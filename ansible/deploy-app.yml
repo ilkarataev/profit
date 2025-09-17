@@ -1,0 +1,125 @@
+---
+# Деплой основного приложения
+- name: Deploy Main Application
+  hosts: all
+  user: appuser
+  become: false
+  vars:
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+    project_dir: /home/appuser/app_project
+    site_domain: "{{ site_domain | default('web.test.ru') }}"
+    compose_file: "docker-compose-production.yml"
+
+  tasks:
+    - name: Display deployment information
+      debug:
+        msg: |
+          ========================================
+          ДЕПЛОЙ ОСНОВНОГО ПРИЛОЖЕНИЯ
+          Домен: {{ site_domain }}
+          Проект: {{ project_dir }}
+          Compose файл: {{ compose_file }}
+          ========================================
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Check if project directory exists
+      stat:
+        path: "{{ project_dir }}"
+      register: project_dir_stat
+
+    - name: Create project directory if not exists
+      file:
+        path: "{{ project_dir }}"
+        state: directory
+        owner: appuser
+        group: appuser
+        mode: '0755'
+      when: not project_dir_stat.stat.exists
+
+    - name: Copy application files
+      copy:
+        src: "{{ item }}"
+        dest: "{{ project_dir }}/{{ item | basename }}"
+        owner: appuser
+        group: appuser
+        mode: '0644'
+      with_fileglob:
+        - "../src/*"
+        - "../*.json"
+        - "../*.yml"
+        - "../*.yaml"
+        - "../Dockerfile"
+        - "../README.md"
+
+    - name: Copy docker-compose files
+      copy:
+        src: "{{ item }}"
+        dest: "{{ project_dir }}/{{ item | basename }}"
+        owner: appuser
+        group: appuser
+        mode: '0644'
+      with_fileglob:
+        - "../docker-compose*.yml"
+
+
+    - name: Stop and remove existing containers
+      docker_compose:
+        project_src: "{{ project_dir }}"
+        state: absent
+        remove_orphans: yes
+      ignore_errors: yes
+
+    - name: Remove specific containers if they exist
+      docker_container:
+        name: "{{ item }}"
+        state: absent
+      ignore_errors: yes
+      loop:
+        - "avito-main"
+        - "hh-main"
+        - "redis-main"
+
+    - name: Create .env file for docker-compose
+      copy:
+        content: |
+          SITE_DOMAIN={{ site_domain }}
+          BASE_URL_AVITO={{ base_url_avito | default('https://api.avito.ru') }}
+          BASE_URL_HH={{ base_url_hh | default('https://api.hh.ru') }}
+        dest: "{{ project_dir }}/.env"
+        owner: appuser
+        group: appuser
+        mode: '0644'
+
+    - name: Build and pull images
+      docker_compose:
+        project_src: "{{ project_dir }}"
+        build: yes
+        pull: yes
+        files:
+          - "{{ compose_file }}"
+        env_file: "{{ project_dir }}/.env"
+
+    - name: Start application containers
+      docker_compose:
+        project_src: "{{ project_dir }}"
+        files:
+          - "{{ compose_file }}"
+        state: present
+        env_file: "{{ project_dir }}/.env"
+
+    - name: Display deployment completion
+      debug:
+        msg: |
+          ========================================
+          ДЕПЛОЙ ЗАВЕРШЕН УСПЕШНО
+          Приложение: https://{{ site_domain }}
+          Avito API: https://{{ site_domain }}/avito/
+          HH API: https://{{ site_domain }}/hh/
+          Portainer: https://{{ site_domain }}/portainer/
+          Traefik: https://{{ site_domain }}/traefik/
+          ========================================
+      delegate_to: localhost
+      run_once: true
+      become: no

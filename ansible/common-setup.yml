@@ -1,0 +1,281 @@
+---
+- name: Common server setup
+  hosts: all
+  user: root
+  vars:
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+  # become: true
+  tasks:
+    - name: Ensure Python is installed
+      raw: test -e /usr/bin/python3 || (apt-get update && apt-get install -y python3)
+
+    - name: Install apt
+      apt:
+        name: apt
+        state: latest
+        update_cache: true
+
+    - name: Install required system packages
+      apt:
+        pkg:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+          - python3-pip
+          - virtualenv
+          - python3-setuptools
+          - git
+          - unzip
+          - etckeeper
+          - wireguard
+          - apache2-utils
+          - fail2ban
+          - snapd
+          - iptables-persistent
+          - jq
+          - rsync
+        state: latest
+        update_cache: true
+
+    - name: Add Docker GPG apt Key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker Repository
+      apt_repository:
+        repo: deb https://download.docker.com/linux/ubuntu focal stable
+        state: present
+
+    - name: Update apt and install docker-ce
+      apt:
+        name: docker-ce
+        state: latest
+        update_cache: true
+
+    - name: Update apt and install docker-compose
+      apt:
+        name: docker-compose
+        state: latest
+        update_cache: true
+
+    - name: Add history settings to .bashrc root
+      lineinfile:
+        path: /home/root/.bashrc
+        state: present
+        create: yes
+        line: "{{ item }}"
+      with_items:
+        - 'export HISTSIZE=10000'
+        - 'export HISTFILESIZE=10000'
+        - 'export HISTCONTROL=ignoreboth:erasedups'
+        - 'export HISTTIMEFORMAT="%d.%m.%Y %H:%M:%S: "'
+        - 'PROMPT_COMMAND="history -a"'
+
+    - name: Install Certbot using Snap
+      command: snap install --classic certbot
+
+    - name: Check if certbot exists and is not a symlink
+      stat:
+        path: /usr/bin/certbot
+      register: certbot_stat
+
+    - name: Remove existing certbot file if it's not a symlink
+      file:
+        path: /usr/bin/certbot
+        state: absent
+      when: certbot_stat.stat.exists and not certbot_stat.stat.islnk
+
+    - name: Create symlink for Certbot
+      file:
+        src: /snap/bin/certbot
+        dest: /usr/bin/certbot
+        state: link
+        force: yes
+
+    - name: Create Portainer data directory
+      file:
+        path: /opt/portainer
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Create Portainer Docker network
+      docker_network:
+        name: portainer
+        state: present
+
+    - name: Generate common password for Traefik and Portainer
+      shell: openssl rand -base64 32
+      register: common_password
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Generate Traefik password hash
+      shell: docker run --rm httpd:2.4-alpine htpasswd -nbB admin "{{ common_password.stdout }}"
+      register: traefik_password
+      run_once: true
+
+    - name: Create Traefik directory
+      file:
+        path: /opt/traefik
+        state: directory
+        mode: '0755'
+
+    - name: Create Traefik auth file
+      copy:
+        content: "{{ traefik_password.stdout }}"
+        dest: /opt/traefik/auth
+        mode: '0600'
+      when: traefik_password is defined
+
+    - name: Save common password for Portainer
+      copy:
+        content: "{{ common_password.stdout }}"
+        dest: /opt/portainer/portainer_password
+        mode: '0600'
+      when: common_password is defined
+
+    - name: Save common password for Traefik
+      copy:
+        content: "{{ common_password.stdout }}"
+        dest: /opt/traefik/traefik_password
+        mode: '0600'
+      when: common_password is defined
+
+    - name: Create reverse proxy network
+      docker_network:
+        name: reverse-proxy
+        state: present
+
+    - name: Create Traefik Let's Encrypt volume
+      docker_volume:
+        name: traefik-letsencrypt
+
+    - name: Deploy Portainer container
+      docker_container:
+        name: portainer
+        image: portainer/portainer-ce:2.33.1
+        state: started
+        restart_policy: always
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+          - /opt/portainer:/data
+        networks:
+          - name: reverse-proxy
+        labels:
+          traefik.enable: "true"
+          traefik.docker.network: "reverse-proxy"
+          traefik.http.routers.portainer.rule: "Host(`{{ site_domain | default('localhost') }}`) && PathPrefix(`/portainer/`)"
+          traefik.http.routers.portainer.tls: "true"
+          traefik.http.routers.portainer.tls.certresolver: "letsencrypt"
+          traefik.http.routers.portainer.entrypoints: "websecure"
+          traefik.http.routers.portainer.middlewares: "portainer-stripprefix"
+          traefik.http.routers.portainer.service: "portainer"
+          traefik.http.services.portainer.loadbalancer.server.port: "9000"
+          traefik.http.middlewares.portainer-stripprefix.stripprefix.prefixes: "/portainer"
+          traefik.http.routers.portainer-http.rule: "Host(`{{ site_domain | default('localhost') }}`) && PathPrefix(`/portainer/`)"
+          traefik.http.routers.portainer-http.entrypoints: "web"
+          traefik.http.routers.portainer-http.middlewares: "portainer-stripprefix"
+          traefik.http.routers.portainer-http.service: "portainer"
+        env:
+          PORTAINER_HTTP_ENABLED: "true"
+
+    - name: Wait for Portainer to start
+      shell: |
+        for i in {1..30}; do
+          if docker exec traefik wget -qO- http://portainer:9000/api/status >/dev/null 2>&1; then
+            echo "Portainer is ready"
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "Portainer startup timeout"
+        exit 1
+      register: portainer_wait_result
+      ignore_errors: true
+
+    - name: Initialize Portainer admin user via Docker exec
+      shell: |
+        docker exec traefik wget -qO- --post-data='{"Username": "admin", "Password": "{{ common_password.stdout }}"}' \
+          --header='Content-Type: application/json' \
+          http://portainer:9000/api/users/admin/init
+      register: portainer_init_result
+      ignore_errors: true
+
+    - name: Display Portainer initialization result
+      debug:
+        msg: "Portainer initialization: {{ portainer_init_result.stdout if portainer_init_result.stdout else 'Failed' }}"
+      when: portainer_init_result is defined
+
+    - name: Deploy Traefik reverse proxy
+      docker_container:
+        name: traefik
+        image: traefik:v3.5.2
+        state: started
+        restart_policy: always
+        ports:
+          - "80:80"
+          - "443:443"
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock:ro
+          - traefik-letsencrypt:/letsencrypt
+          - /opt/traefik/auth:/auth
+        command:
+          - --api.dashboard=true
+          - --api.insecure=true
+          - --providers.docker=true
+          - --providers.docker.exposedbydefault=false
+          - --providers.docker.network=reverse-proxy
+          - --entrypoints.web.address=:80
+          - --entrypoints.websecure.address=:443
+          - --certificatesresolvers.letsencrypt.acme.tlschallenge=true
+          - --certificatesresolvers.letsencrypt.acme.email=ilkarataev@gmail.com
+          - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+          - --entrypoints.web.http.redirections.entrypoint.to=websecure
+          - --entrypoints.web.http.redirections.entrypoint.scheme=https
+        networks:
+          - name: reverse-proxy
+        labels:
+          traefik.enable: "true"
+          traefik.http.routers.traefik.rule: "Host(`{{ site_domain | default('localhost') }}`) && PathPrefix(`/traefik/`)"
+          traefik.http.routers.traefik.tls: "true"
+          traefik.http.routers.traefik.tls.certresolver: "letsencrypt"
+          traefik.http.routers.traefik.entrypoints: "websecure"
+          traefik.http.routers.traefik.service: "api@internal"
+          traefik.http.routers.traefik.middlewares: "traefik-auth,traefik-stripprefix"
+          traefik.http.middlewares.traefik-auth.basicauth.usersfile: "/auth"
+          traefik.http.middlewares.traefik-stripprefix.stripprefix.prefixes: "/traefik"
+
+    - name: Ensure fail2ban is installed
+      apt:
+        name: fail2ban
+        state: present
+        update_cache: true
+
+    - name: Ensure /etc/fail2ban/jail.local exists
+      file:
+        path: /etc/fail2ban/jail.local
+        state: touch
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Configure fail2ban for sshd
+      blockinfile:
+        path: /etc/fail2ban/jail.local
+        block: |
+          [sshd]
+          enabled   = true
+          maxretry  = 2
+          findtime  = 5h
+          bantime   = 30d
+          ignoreip  = 127.0.0.1/8
+
+    - name: Restart fail2ban service
+      service:
+        name: fail2ban
+        state: restarted

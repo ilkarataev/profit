@@ -1,0 +1,233 @@
+---
+# Настройка сервера для развертывания приложений
+- name: Server setup for applications deployment
+  hosts: all
+  user: root
+  become: true
+  vars:
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+    site_domain: "{{ site_domain | default('web.test.ru') }}"
+    user_name: appuser
+  vars_files:
+    - ssh_key.yml
+
+  tasks:
+    - name: Display server setup information
+      debug:
+        msg: |
+          ========================================
+          НАСТРОЙКА СЕРВЕРА ДЛЯ РАЗВЕРТЫВАНИЯ ПРИЛОЖЕНИЙ
+          Домен: {{ site_domain }}
+          Пользователь: {{ user_name }}
+          ========================================
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Create user {{ user_name }}
+      user:
+        name: "{{ user_name }}"
+        state: present
+        shell: /bin/bash
+
+    - name: Create .ssh directory for {{ user_name }}
+      file:
+        path: "/home/{{ user_name }}/.ssh"
+        state: directory
+        owner: "{{ user_name }}"
+        group: "{{ user_name }}"
+        mode: '0700'
+
+    - name: Add authorized key for {{ user_name }}
+      authorized_key:
+        user: "{{ user_name }}"
+        state: present
+        key: "{{ ssh_public_key }}"
+
+    - name: Create project directory for {{ user_name }}
+      file:
+        path: "/home/{{ user_name }}/app_project"
+        state: directory
+        owner: "{{ user_name }}"
+        group: "{{ user_name }}"
+        mode: '0755'
+
+    - name: Add history settings to .bashrc
+      lineinfile:
+        path: "/home/{{ user_name }}/.bashrc"
+        state: present
+        create: yes
+        line: "{{ item }}"
+      with_items:
+        - 'export HISTSIZE=10000'
+        - 'export HISTFILESIZE=10000'
+        - 'export HISTCONTROL=ignoreboth:erasedups'
+        - 'export HISTTIMEFORMAT="%d.%m.%Y %H:%M:%S: "'
+        - 'PROMPT_COMMAND="history -a"'
+        - 'export COMPOSE_FILE=docker-compose-production.yml'
+        - '# Application Environment'
+      become: true
+      become_user: "{{ user_name }}"
+
+    - name: Display setup completion
+      debug:
+        msg: |
+          ========================================
+          НАСТРОЙКА СЕРВЕРА ЗАВЕРШЕНА
+          Пользователь: {{ user_name }}
+          Проект: /home/{{ user_name }}/app_project
+          Домен: {{ site_domain }}
+          ========================================
+          Данные для входа будут показаны ниже
+          ========================================
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+- import_playbook: common-setup.yml
+  vars:
+    site_domain: "{{ site_domain }}"
+    user_name: "{{ user_name }}"
+
+- name: Ensure Portainer is initialized
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Get common password
+      shell: cat /opt/portainer/portainer_password 2>/dev/null || echo "Password not found"
+      register: common_password
+      run_once: true
+
+    - name: Check if Portainer needs initialization
+      shell: |
+        if docker exec traefik wget -qO- http://portainer:9000/api/status >/dev/null 2>&1; then
+          echo "Portainer is running"
+          exit 0
+        else
+          echo "Portainer needs initialization"
+          exit 1
+        fi
+      register: portainer_status
+      ignore_errors: true
+
+    - name: Initialize Portainer if needed
+      shell: |
+        docker exec traefik wget -qO- --post-data='{"Username": "admin", "Password": "{{ common_password.stdout }}"}' \
+          --header='Content-Type: application/json' \
+          http://portainer:9000/api/users/admin/init
+      register: portainer_init_result
+      ignore_errors: true
+      when: portainer_status.rc != 0
+
+    - name: Display Portainer initialization result
+      debug:
+        msg: "Portainer initialization: {{ portainer_init_result.stdout if portainer_init_result is defined and portainer_init_result.stdout is defined else 'Already initialized or failed' }}"
+      when: portainer_init_result is defined
+
+- name: Display final credentials
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Get common password
+      shell: cat /opt/portainer/portainer_password 2>/dev/null || echo "Password not found"
+      register: portainer_password
+      run_once: true
+
+    - name: Display header
+      debug:
+        msg: "======================================="
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Display credentials title
+      debug:
+        msg: "🔐 ДАННЫЕ ДЛЯ ВХОДА"
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Display separator
+      debug:
+        msg: "======================================="
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Display Portainer section
+      debug:
+        msg: "🐳 PORTAINER:"
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Display Portainer URL
+      debug:
+        msg: "URL: https://{{ site_domain }}/portainer/"
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Display empty line
+      debug:
+        msg: ""
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Display Traefik section
+      debug:
+        msg: "🚦 TRAEFIK DASHBOARD:"
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Display Traefik URL
+      debug:
+        msg: "URL: https://{{ site_domain }}/traefik/"
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Display empty line
+      debug:
+        msg: ""
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Display common credentials
+      debug:
+        msg: "👤 ПОЛЬЗОВАТЕЛЬ: admin"
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Display common password
+      debug:
+        msg: "🔑 ПАРОЛЬ: {{ portainer_password.stdout }}"
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Display separator
+      debug:
+        msg: "======================================="
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Display warning
+      debug:
+        msg: "⚠️  Сохраните эти данные в безопасном месте!"
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Display footer
+      debug:
+        msg: "======================================="
+      delegate_to: localhost
+      run_once: true
+      become: no
+
