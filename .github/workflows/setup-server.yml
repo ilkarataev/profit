@@ -9,9 +9,9 @@ on:
         default: 'web.test.ru'
         type: string
       server_ip:
-        description: 'Server IP address'
+        description: 'Server IPv4 address'
         required: true
-        default: '46.62.213.224'
+        default: '123.123.123.123'
         type: string
 
 jobs:

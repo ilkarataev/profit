@@ -89,40 +89,6 @@
     site_domain: "{{ site_domain }}"
     user_name: "{{ user_name }}"
 
-- name: Ensure Portainer is initialized
-  hosts: all
-  gather_facts: false
-  tasks:
-    - name: Get common password
-      shell: cat /opt/portainer/portainer_password 2>/dev/null || echo "Password not found"
-      register: common_password
-      run_once: true
-
-    - name: Check if Portainer needs initialization
-      shell: |
-        if docker exec traefik wget -qO- http://portainer:9000/api/status >/dev/null 2>&1; then
-          echo "Portainer is running"
-          exit 0
-        else
-          echo "Portainer needs initialization"
-          exit 1
-        fi
-      register: portainer_status
-      ignore_errors: true
-
-    - name: Initialize Portainer if needed
-      shell: |
-        docker exec traefik wget -qO- --post-data='{"Username": "admin", "Password": "{{ common_password.stdout }}"}' \
-          --header='Content-Type: application/json' \
-          http://portainer:9000/api/users/admin/init
-      register: portainer_init_result
-      ignore_errors: true
-      when: portainer_status.rc != 0
-
-    - name: Display Portainer initialization result
-      debug:
-        msg: "Portainer initialization: {{ portainer_init_result.stdout if portainer_init_result is defined and portainer_init_result.stdout is defined else 'Already initialized or failed' }}"
-      when: portainer_init_result is defined
 
 - name: Display final credentials
   hosts: all

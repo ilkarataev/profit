@@ -198,19 +198,6 @@
       register: portainer_wait_result
       ignore_errors: true
 
-    - name: Initialize Portainer admin user via Docker exec
-      shell: |
-        docker exec traefik wget -qO- --post-data='{"Username": "admin", "Password": "{{ common_password.stdout }}"}' \
-          --header='Content-Type: application/json' \
-          http://portainer:9000/api/users/admin/init
-      register: portainer_init_result
-      ignore_errors: true
-
-    - name: Display Portainer initialization result
-      debug:
-        msg: "Portainer initialization: {{ portainer_init_result.stdout if portainer_init_result.stdout else 'Failed' }}"
-      when: portainer_init_result is defined
-
     - name: Deploy Traefik reverse proxy
       docker_container:
         name: traefik
@@ -279,3 +266,30 @@
       service:
         name: fail2ban
         state: restarted
+
+    - name: Wait for Traefik to start
+      shell: |
+        for i in {1..30}; do
+          if docker exec traefik wget -qO- http://portainer:9000/api/status >/dev/null 2>&1; then
+            echo "Traefik and Portainer are ready"
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "Traefik/Portainer startup timeout"
+        exit 1
+      register: traefik_wait_result
+      ignore_errors: true
+
+    - name: Initialize Portainer admin user via Docker exec
+      shell: |
+        docker exec traefik wget -qO- --post-data='{"Username": "admin", "Password": "{{ common_password.stdout }}"}' \
+          --header='Content-Type: application/json' \
+          http://portainer:9000/api/users/admin/init
+      register: portainer_init_result
+      ignore_errors: true
+
+    - name: Display Portainer initialization result
+      debug:
+        msg: "Portainer initialization: {{ portainer_init_result.stdout if portainer_init_result.stdout else 'Failed' }}"
+      when: portainer_init_result is defined
