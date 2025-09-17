@@ -1,4 +1,4 @@
-name: Deploy Application
+name: Setup Server
 
 on:
   workflow_dispatch:
@@ -13,17 +13,9 @@ on:
         required: true
         default: '46.62.213.224'
         type: string
-      action:
-        description: 'Action to perform'
-        required: true
-        default: 'deploy'
-        type: choice
-        options:
-          - deploy
-          - update
 
 jobs:
-  deploy:
+  setup:
     runs-on: ubuntu-latest
     
     steps:
@@ -36,14 +28,13 @@ jobs:
         sudo apt-get install -y ansible
         ansible --version
 
-    - name: Display deployment information
+    - name: Display setup information
       run: |
         echo "========================================="
-        echo "🚀 APPLICATION DEPLOYMENT"
+        echo "🚀 SERVER SETUP"
         echo "========================================="
         echo "🌐 Domain: ${{ inputs.domain }}"
         echo "🔗 IP Address: ${{ inputs.server_ip }}"
-        echo "🔧 Action: ${{ inputs.action }}"
         echo "========================================="
 
     - name: Create SSH key file
@@ -53,39 +44,25 @@ jobs:
         chmod 600 ~/.ssh/id_rsa
         ssh-keygen -y -f ~/.ssh/id_rsa > ~/.ssh/id_rsa.pub
 
-    - name: Deploy application
-      if: ${{ inputs.action == 'deploy' }}
+    - name: Setup server
       run: |
         cd ansible
-        ansible-playbook -i "${{ inputs.server_ip }}," deploy-app.yml \
+        ansible-playbook -i "${{ inputs.server_ip }}," playbook-server.yml \
           --private-key=~/.ssh/id_rsa \
-          -u appuser \
+          -u root \
           -e "site_domain=${{ inputs.domain }}"
       env:
         ANSIBLE_HOST_KEY_CHECKING: False
 
-    - name: Update application
-      if: ${{ inputs.action == 'update' }}
-      run: |
-        cd ansible
-        ansible-playbook -i "${{ inputs.server_ip }}," deploy-app.yml \
-          --private-key=~/.ssh/id_rsa \
-          -u appuser \
-          -e "site_domain=${{ inputs.domain }}" \
-          --tags update
-      env:
-        ANSIBLE_HOST_KEY_CHECKING: False
-
-    - name: Notify deployment status
+    - name: Display setup completion
       if: always()
       run: |
         DOMAIN="${{ inputs.domain }}"
-        ACTION="${{ inputs.action }}"
         IP="${{ inputs.server_ip }}"
         
         echo "========================================="
         if [ ${{ job.status }} == 'success' ]; then
-          echo "✅ $ACTION successful!"
+          echo "✅ Server setup successful!"
           echo "🌐 Domain: https://$DOMAIN"
           echo "🔗 IP Address: $IP"
           echo "🐳 Portainer: https://$DOMAIN/portainer/"
@@ -94,9 +71,9 @@ jobs:
           echo "📝 Next steps:"
           echo "1. Check Portainer: https://$DOMAIN/portainer/"
           echo "2. Check Traefik: https://$DOMAIN/traefik/"
-          echo "3. Deploy your application to: https://$DOMAIN/"
+          echo "3. Run 'Deploy Application' workflow to deploy your app"
         else
-          echo "❌ $ACTION failed!"
+          echo "❌ Server setup failed!"
           echo "🔍 Check the logs above for details"
         fi
         echo "========================================="
