@@ -29,6 +29,7 @@
           - "🔗 IP Address: {{ ansible_host }}"
           - "🔐 Redis Password: {{ redis_password }}"
           - "📁 Playbook dir: {{ playbook_dir }}"
+          - "📁 Project root: {{ playbook_dir | dirname }}"
           - "📁 App dir: {{ app_dir }}"
           - "========================================="
 
@@ -40,14 +41,18 @@
         group: "{{ app_user }}"
         mode: '0755'
 
+    - name: Set project root directory
+      set_fact:
+        project_root: "{{ playbook_dir | dirname }}"
+
     - name: Check if source files exist
       stat:
         path: "{{ item }}"
       register: source_files
       loop:
-        - "{{ playbook_dir }}/../avito-main"
-        - "{{ playbook_dir }}/../hh-main"
-        - "{{ playbook_dir }}/../docker-compose-universal.yml"
+        - "{{ project_root }}/avito-main"
+        - "{{ project_root }}/hh-main"
+        - "{{ project_root }}/docker-compose-universal.yml"
 
     - name: Display source file status
       debug:
@@ -61,9 +66,9 @@
         owner: "{{ app_user }}"
         group: "{{ app_user }}"
       loop:
-        - "{{ playbook_dir }}/../avito-main"
-        - "{{ playbook_dir }}/../hh-main"
-        - "{{ playbook_dir }}/../docker-compose-universal.yml"
+        - "{{ project_root }}/avito-main"
+        - "{{ project_root }}/hh-main"
+        - "{{ project_root }}/docker-compose-universal.yml"
 
     - name: Create environment file
       template:

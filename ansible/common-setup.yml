@@ -300,6 +300,8 @@
         image: portainer/portainer-ce:2.33.1
         state: started
         restart_policy: always
+        ports:
+          - "127.0.0.1:9000:9000"
         volumes:
           - /var/run/docker.sock:/var/run/docker.sock
           - /opt/portainer:/data
@@ -326,7 +328,7 @@
     - name: Wait for Portainer to start
       shell: |
         for i in {1..20}; do
-          if docker exec portainer wget -qO- http://localhost:9000/api/status >/dev/null 2>&1; then
+          if curl -s http://127.0.0.1:9000/api/status >/dev/null 2>&1; then
             echo "Portainer is ready"
             exit 0
           fi
@@ -337,15 +339,16 @@
       register: portainer_wait_result
       ignore_errors: true
 
-    - name: Initialize Portainer admin user via Docker exec
+    - name: Initialize Portainer admin user
       shell: |
-        docker exec portainer wget -qO- --post-data='{"Username": "admin", "Password": "{{ common_password.stdout }}"}' \
-          --header='Content-Type: application/json' \
-          http://localhost:9000/api/users/admin/init
+        curl -s -X POST \
+          -H "Content-Type: application/json" \
+          -d '{"Username": "admin", "Password": "{{ common_password.stdout }}"}' \
+          http://127.0.0.1:9000/api/users/admin/init
       register: portainer_init_result
       ignore_errors: true
 
     - name: Display Portainer initialization result
       debug:
-        msg: "Portainer initialization: {{ portainer_init_result.stdout if portainer_init_result.stdout else 'Failed' }}"
+        msg: "Portainer initialization: {{ portainer_init_result.stdout if portainer_init_result.rc == 0 else 'Failed' }}"
       when: portainer_init_result is defined
