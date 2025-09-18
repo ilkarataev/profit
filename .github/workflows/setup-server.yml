@@ -40,15 +40,14 @@ jobs:
           echo "ℹ️  Continuing with deployment - SSH connection will be tested during Ansible run"
         fi
 
-    - name: Setup Ansible
+    - name: Run Ansible with container
       run: |
-        sudo apt-get update
-        sudo apt-get install -y ansible
-        ansible --version
-
-    - name: Install Ansible collections
-      run: |
-        ansible-galaxy collection install -r ansible/requirements.yml
+        docker run --rm \
+          -v ${{ github.workspace }}:/workspace \
+          -w /workspace \
+          -e ANSIBLE_HOST_KEY_CHECKING=False \
+          ghcr.io/ansible/creator-ee:latest \
+          ansible-galaxy collection install -r ansible/requirements.yml
 
     - name: Display setup information
       run: |
@@ -62,22 +61,24 @@ jobs:
         echo "ℹ️  SSH connection will be tested during Ansible execution"
         echo "========================================="
 
-    - name: Create SSH key file
+    - name: Setup server
       run: |
+        # Create SSH key file
         mkdir -p ~/.ssh
         echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
-        ssh-keygen -y -f ~/.ssh/id_rsa > ~/.ssh/id_rsa.pub
-
-    - name: Setup server
-      run: |
-        cd ansible
-        ansible-playbook -i "${{ inputs.domain }}," playbook-server.yml \
-          --private-key=~/.ssh/id_rsa \
-          -u root \
-          -e "site_domain=${{ inputs.domain }}"
-      env:
-        ANSIBLE_HOST_KEY_CHECKING: False
+        
+        # Run Ansible playbook with container
+        docker run --rm \
+          -v ${{ github.workspace }}:/workspace \
+          -v ~/.ssh:/root/.ssh:ro \
+          -w /workspace/ansible \
+          -e ANSIBLE_HOST_KEY_CHECKING=False \
+          ghcr.io/ansible/creator-ee:latest \
+          ansible-playbook -i "${{ inputs.domain }}," playbook-server.yml \
+            --private-key=/root/.ssh/id_rsa \
+            -u root \
+            -e "site_domain=${{ inputs.domain }}"
 
     - name: Display setup completion
       if: always()

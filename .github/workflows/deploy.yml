@@ -40,15 +40,13 @@ jobs:
             echo "✅ DNS: ${{ inputs.domain }} -> $DNS_IP"
           fi
 
-      - name: Setup Ansible
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ansible
-          ansible --version
-
       - name: Install Ansible collections
         run: |
-          ansible-galaxy collection install -r ansible/requirements.yml
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            ghcr.io/ansible/creator-ee:latest \
+            ansible-galaxy collection install -r ansible/requirements.yml
 
       - name: Start SSH agent
         uses: webfactory/ssh-agent@v0.9.0
@@ -60,28 +58,25 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H ${{ inputs.domain }} >> ~/.ssh/known_hosts
 
-      - name: ansible --version
-        run: |
-          ansible --version
-          ansible-galaxy collection list || true
-
       - name: Deploy / Update
-        env:
-          ANSIBLE_HOST_KEY_CHECKING: "False"
         run: |
-          cd ansible
-          ansible-playbook -i "${{ inputs.domain }}," deploy-universal.yml \
-            -u appuser \
-            -e "site_domain=${{ inputs.domain }}" \
-            -e "client_name=${{ inputs.client_name }}" \
-            -e "avito_api_url=${{ vars[format('{0}_AVITO_API_URL', inputs.client_name)] }}" \
-            -e "hh_client_id=${{ vars[format('{0}_HH_CLIENT_ID', inputs.client_name)] }}" \
-            -e "hh_client_secret=${{ secrets[format('{0}_HH_CLIENT_SECRET', inputs.client_name)] }}" \
-            -e "hh_api_url=${{ vars[format('{0}_HH_API_URL', inputs.client_name)] }}" \
-            -e "webhook_url_avito=${{ vars[format('{0}_WEBHOOK_URL_AVITO', inputs.client_name)] }}" \
-            -e "webhook_url_hh=${{ vars[format('{0}_WEBHOOK_URL_HH', inputs.client_name)] }}" \
-            -e "sentry_dsn=${{ secrets[format('{0}_SENTRY_DSN', inputs.client_name)] }}" \
-            $([ "${{ inputs.action }}" = "update" ] && echo "--tags update")
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace/ansible \
+            -e ANSIBLE_HOST_KEY_CHECKING=False \
+            ghcr.io/ansible/creator-ee:latest \
+            ansible-playbook -i "${{ inputs.domain }}," deploy-universal.yml \
+              -u appuser \
+              -e "site_domain=${{ inputs.domain }}" \
+              -e "client_name=${{ inputs.client_name }}" \
+              -e "avito_api_url=${{ vars[format('{0}_AVITO_API_URL', inputs.client_name)] }}" \
+              -e "hh_client_id=${{ vars[format('{0}_HH_CLIENT_ID', inputs.client_name)] }}" \
+              -e "hh_client_secret=${{ secrets[format('{0}_HH_CLIENT_SECRET', inputs.client_name)] }}" \
+              -e "hh_api_url=${{ vars[format('{0}_HH_API_URL', inputs.client_name)] }}" \
+              -e "webhook_url_avito=${{ vars[format('{0}_WEBHOOK_URL_AVITO', inputs.client_name)] }}" \
+              -e "webhook_url_hh=${{ vars[format('{0}_WEBHOOK_URL_HH', inputs.client_name)] }}" \
+              -e "sentry_dsn=${{ secrets[format('{0}_SENTRY_DSN', inputs.client_name)] }}" \
+              $([ "${{ inputs.action }}" = "update" ] && echo "--tags update")
 
       - name: Cleanup SSH key
         if: always()
