@@ -135,77 +135,76 @@ jobs:
         chmod 600 ~/.ssh/id_rsa
         ssh-keygen -y -f ~/.ssh/id_rsa > ~/.ssh/id_rsa.pub
 
-        - name: Deploy application
-          if: ${{ inputs.action == 'deploy' }}
-          run: |
-            cd ansible
-            ansible-playbook -i "${{ inputs.domain }}," deploy-universal.yml \
-              --private-key=~/.ssh/id_rsa \
-              -u appuser \
-              -e "site_domain=${{ inputs.domain }}" \
-              -e "client_name=${{ inputs.client_name }}" \
-              -e "avito_api_url=${{ vars[format('{0}_AVITO_API_URL', inputs.client_name)] }}" \
-              -e "hh_client_id=${{ vars[format('{0}_HH_CLIENT_ID', inputs.client_name)] }}" \
-              -e "hh_client_secret=${{ secrets[format('{0}_HH_CLIENT_SECRET', inputs.client_name)] }}" \
-              -e "hh_api_url=${{ vars[format('{0}_HH_API_URL', inputs.client_name)] }}" \
-              -e "webhook_url_avito=${{ vars[format('{0}_WEBHOOK_URL_AVITO', inputs.client_name)] }}" \
-              -e "webhook_url_hh=${{ vars[format('{0}_WEBHOOK_URL_HH', inputs.client_name)] }}" \
-              -e "sentry_dsn=${{ secrets[format('{0}_SENTRY_DSN', inputs.client_name)] }}"
-          env:
-            ANSIBLE_HOST_KEY_CHECKING: False
+      - name: Deploy application
+        if: ${{ inputs.action == 'deploy' }}
+        run: |
+          cd ansible
+          ansible-playbook -i "${{ inputs.domain }}," deploy-universal.yml \
+            --private-key=~/.ssh/id_rsa \
+            -u appuser \
+            -e "site_domain=${{ inputs.domain }}" \
+            -e "client_name=${{ inputs.client_name }}" \
+            -e "avito_api_url=${{ vars[format('{0}_AVITO_API_URL', inputs.client_name)] }}" \
+            -e "hh_client_id=${{ vars[format('{0}_HH_CLIENT_ID', inputs.client_name)] }}" \
+            -e "hh_client_secret=${{ secrets[format('{0}_HH_CLIENT_SECRET', inputs.client_name)] }}" \
+            -e "hh_api_url=${{ vars[format('{0}_HH_API_URL', inputs.client_name)] }}" \
+            -e "webhook_url_avito=${{ vars[format('{0}_WEBHOOK_URL_AVITO', inputs.client_name)] }}" \
+            -e "webhook_url_hh=${{ vars[format('{0}_WEBHOOK_URL_HH', inputs.client_name)] }}" \
+            -e "sentry_dsn=${{ secrets[format('{0}_SENTRY_DSN', inputs.client_name)] }}"
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: False
 
-        - name: Update application
-          if: ${{ inputs.action == 'update' }}
-          run: |
-            cd ansible
-            ansible-playbook -i "${{ inputs.domain }}," deploy-universal.yml \
-              --private-key=~/.ssh/id_rsa \
-              -u appuser \
-              -e "site_domain=${{ inputs.domain }}" \
-              -e "client_name=${{ inputs.client_name }}" \
-              -e "avito_api_url=${{ vars[format('{0}_AVITO_API_URL', inputs.client_name)] }}" \
-              -e "hh_client_id=${{ vars[format('{0}_HH_CLIENT_ID', inputs.client_name)] }}" \
-              -e "hh_client_secret=${{ secrets[format('{0}_HH_CLIENT_SECRET', inputs.client_name)] }}" \
-              -e "hh_api_url=${{ vars[format('{0}_HH_API_URL', inputs.client_name)] }}" \
-              -e "webhook_url_avito=${{ vars[format('{0}_WEBHOOK_URL_AVITO', inputs.client_name)] }}" \
-              -e "webhook_url_hh=${{ vars[format('{0}_WEBHOOK_URL_HH', inputs.client_name)] }}" \
-              -e "sentry_dsn=${{ secrets[format('{0}_SENTRY_DSN', inputs.client_name)] }}" \
-              --tags update
-          env:
-            ANSIBLE_HOST_KEY_CHECKING: False
+      - name: Update application
+        if: ${{ inputs.action == 'update' }}
+        run: |
+          cd ansible
+          ansible-playbook -i "${{ inputs.domain }}," deploy-universal.yml \
+            --private-key=~/.ssh/id_rsa \
+            -u appuser \
+            -e "site_domain=${{ inputs.domain }}" \
+            -e "client_name=${{ inputs.client_name }}" \
+            -e "avito_api_url=${{ vars[format('{0}_AVITO_API_URL', inputs.client_name)] }}" \
+            -e "hh_client_id=${{ vars[format('{0}_HH_CLIENT_ID', inputs.client_name)] }}" \
+            -e "hh_client_secret=${{ secrets[format('{0}_HH_CLIENT_SECRET', inputs.client_name)] }}" \
+            -e "hh_api_url=${{ vars[format('{0}_HH_API_URL', inputs.client_name)] }}" \
+            -e "webhook_url_avito=${{ vars[format('{0}_WEBHOOK_URL_AVITO', inputs.client_name)] }}" \
+            -e "webhook_url_hh=${{ vars[format('{0}_WEBHOOK_URL_HH', inputs.client_name)] }}" \
+            -e "sentry_dsn=${{ secrets[format('{0}_SENTRY_DSN', inputs.client_name)] }}" \
+            --tags update
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: False
 
-        - name: Notify deployment status
-          if: always()
-          run: |
-            DOMAIN="${{ inputs.domain }}"
-            ACTION="${{ inputs.action }}"
-            IP="${{ inputs.server_ip }}"
-            CLIENT="${{ inputs.client_name }}"
-            
-            echo "========================================="
-            if [ ${{ job.status }} == 'success' ]; then
-              echo "✅ $ACTION successful!"
+      - name: Notify deployment status
+        if: always()
+        run: |
+          DOMAIN="${{ inputs.domain }}"
+          ACTION="${{ inputs.action }}"
+          CLIENT="${{ inputs.client_name }}"
+          
+          echo "========================================="
+          if [ ${{ job.status }} == 'success' ]; then
+            echo "✅ $ACTION successful!"
             echo "🌐 Domain: https://$DOMAIN"
             echo "👤 Client: $CLIENT"
-              echo "========================================="
-              echo "📱 Services:"
-              echo "  • Avito API: https://$DOMAIN/avito/"
-              echo "  • HH API: https://$DOMAIN/hh/"
-              echo "  • Redis: redis-$CLIENT"
-              echo "========================================="
-              echo "🐳 Portainer: https://$DOMAIN/portainer/"
-              echo "🚦 Traefik: https://$DOMAIN/traefik/"
-              echo "========================================="
-              echo "📝 Next steps:"
-              echo "1. Check Portainer: https://$DOMAIN/portainer/"
-              echo "2. Check Traefik: https://$DOMAIN/traefik/"
-              echo "3. Test Avito API: https://$DOMAIN/avito/"
-              echo "4. Test HH API: https://$DOMAIN/hh/"
-            else
-              echo "❌ $ACTION failed!"
-              echo "🔍 Check the logs above for details"
-            fi
             echo "========================================="
+            echo "📱 Services:"
+            echo "  • Avito API: https://$DOMAIN/avito/"
+            echo "  • HH API: https://$DOMAIN/hh/"
+            echo "  • Redis: redis-$CLIENT"
+            echo "========================================="
+            echo "🐳 Portainer: https://$DOMAIN/portainer/"
+            echo "🚦 Traefik: https://$DOMAIN/traefik/"
+            echo "========================================="
+            echo "📝 Next steps:"
+            echo "1. Check Portainer: https://$DOMAIN/portainer/"
+            echo "2. Check Traefik: https://$DOMAIN/traefik/"
+            echo "3. Test Avito API: https://$DOMAIN/avito/"
+            echo "4. Test HH API: https://$DOMAIN/hh/"
+          else
+            echo "❌ $ACTION failed!"
+            echo "🔍 Check the logs above for details"
+          fi
+          echo "========================================="
 
     - name: Cleanup SSH key
       if: always()
