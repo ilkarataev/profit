@@ -1,0 +1,31 @@
+version: '3'
+services:
+  nodejs-avito:
+    restart: always
+    build: .
+    volumes:
+      - ./temp:/usr/src/app/temp
+    ports:
+      - "127.0.0.1:5001:5001"
+    entrypoint: ["npm", "run", "start:prod"]
+    environment:
+      - BASE_URL=${BASE_URL_AVITO}
+  nodejs-hh:
+    restart: always
+    build: .
+    volumes:
+      - ./temp:/usr/src/app/temp
+    ports:
+      - "127.0.0.1:5002:5002"
+    entrypoint: ["npm", "run", "start:prod"]
+    environment:
+      - BASE_URL=${BASE_URL_HH}
+  redis:
+    container_name: msavito-5-redis
+    image: redis:7-alpine
+    command: --port 6386
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:

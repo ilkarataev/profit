@@ -1,0 +1,38 @@
+# Universal Application Environment Configuration
+# Client: {{ client_name }}
+# Domain: {{ site_domain }}
+
+# Application Configuration
+CLIENT_NAME={{ client_name }}
+DOMAIN={{ site_domain }}
+NODE_ENV=production
+
+# Redis Configuration
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_USER={{ redis_user | default('') }}
+REDIS_PASSWORD={{ redis_password }}
+
+# Avito API Configuration
+AVITO_API_URL={{ avito_api_url | default('https://api.avito.ru') }}
+
+# HH API Configuration
+HH_CLIENT_ID={{ hh_client_id }}
+HH_CLIENT_SECRET={{ hh_client_secret }}
+HH_API_URL={{ hh_api_url | default('https://api.hh.ru') }}
+
+# Webhook Configuration
+WEBHOOK_URL_AVITO={{ webhook_url_avito }}
+WEBHOOK_URL_HH={{ webhook_url_hh }}
+
+# Base URLs for services
+BASE_URL=https://{{ site_domain }}
+BASE_URL_AVITO=https://{{ site_domain }}/avito
+BASE_URL_HH=https://{{ site_domain }}/hh
+
+# Sentry Configuration (optional)
+SENTRY_DSN={{ sentry_dsn | default('') }}
+
+# Port Configuration
+AVITO_PORT=3030
+HH_PORT=3999

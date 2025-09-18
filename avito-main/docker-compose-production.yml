@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  mspartners-avito:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: "avito-main"
+    restart: unless-stopped
+    networks:
+      - reverse-proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=reverse-proxy"
+      - "traefik.http.routers.avito.rule=Host(`${SITE_DOMAIN}`) && PathPrefix(`/avito/`)"
+      - "traefik.http.routers.avito.tls=true"
+      - "traefik.http.routers.avito.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.avito.entrypoints=websecure"
+      - "traefik.http.routers.avito.middlewares=avito-stripprefix"
+      - "traefik.http.middlewares.avito-stripprefix.stripprefix.prefixes=/avito"
+      - "traefik.http.services.avito.loadbalancer.server.port=5001"
+    volumes:
+      - avito-data:/usr/src/app/temp
+    environment:
+      - NODE_ENV=production
+      - SITE_DOMAIN=${SITE_DOMAIN}
+      - BASE_URL=${BASE_URL_AVITO}
+    entrypoint: ["npm", "run", "start:prod"]
+
+  mspartners-hh:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: "hh-main"
+    restart: unless-stopped
+    networks:
+      - reverse-proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=reverse-proxy"
+      - "traefik.http.routers.hh.rule=Host(`${SITE_DOMAIN}`) && PathPrefix(`/hh/`)"
+      - "traefik.http.routers.hh.tls=true"
+      - "traefik.http.routers.hh.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.hh.entrypoints=websecure"
+      - "traefik.http.routers.hh.middlewares=hh-stripprefix"
+      - "traefik.http.middlewares.hh-stripprefix.stripprefix.prefixes=/hh"
+      - "traefik.http.services.hh.loadbalancer.server.port=5002"
+    volumes:
+      - hh-data:/usr/src/app/temp
+    environment:
+      - NODE_ENV=production
+      - SITE_DOMAIN=${SITE_DOMAIN}
+      - BASE_URL=${BASE_URL_HH}
+    entrypoint: ["npm", "run", "start:prod"]
+
+  redis:
+    container_name: "redis-main"
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: --port 6386
+    volumes:
+      - redis-data:/data
+    networks:
+      - reverse-proxy
+
+networks:
+  reverse-proxy:
+    external: true
+
+volumes:
+  avito-data:
+    driver: local
+  hh-data:
+    driver: local
+  redis-data:
+    driver: local

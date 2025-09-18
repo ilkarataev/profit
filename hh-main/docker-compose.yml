@@ -1,0 +1,28 @@
+services:
+  mspartners-hh:
+    restart: always
+    image: registry.gitlab.com/getamo/private/mspartners/mspartners_hh:latest
+    ports:
+      - "3999:3999"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=reverse-proxy-docker-traefik_routing"
+      # https
+      - "traefik.http.routers.mspartners-hh.rule=Host(`mshh.getamo.ru`)"
+      - "traefik.http.routers.mspartners-hh.tls=true"
+      - "traefik.http.routers.mspartners-hh.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.mspartners-hh.entrypoints=websecure"
+      # http (redirect to https)
+      - "traefik.http.routers.mspartners-hh-http.rule=Host(`mshh.getamo.ru`)"
+      - "traefik.http.routers.mspartners-hh-http.entrypoints=web"
+      - "traefik.http.routers.mspartners-hh-http.middlewares=redirect-to-https@file"
+    networks:
+     - backend
+    volumes:
+      - mspartners-hh:/usr/src/app/temp
+networks:
+  backend:
+    external: true
+    name: reverse-proxy-docker-traefik_routing
+volumes:
+  mspartners-hh:

@@ -12,12 +12,60 @@
     - ssh_key.yml
 
   tasks:
+    - name: Check SSH key exists
+      stat:
+        path: "{{ ansible_ssh_private_key_file | default('~/.ssh/id_rsa') }}"
+      register: ssh_key_file
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Fail if SSH key not found
+      fail:
+        msg: "SSH private key not found at {{ ansible_ssh_private_key_file | default('~/.ssh/id_rsa') }}. Please ensure SSH key is properly configured."
+      when: not ssh_key_file.stat.exists
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Check DNS resolution
+      command: dig +short {{ site_domain }}
+      register: dns_result
+      delegate_to: localhost
+      run_once: true
+      become: no
+      ignore_errors: yes
+
+    - name: Fail if DNS not configured
+      fail:
+        msg: "DNS record for {{ site_domain }} not found or not pointing to this server. Please configure DNS A record first."
+      when: dns_result.rc != 0 or dns_result.stdout == ""
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Get server IP address
+      command: hostname -I | awk '{print $1}'
+      register: server_ip
+      delegate_to: "{{ ansible_host }}"
+      run_once: true
+
+    - name: Verify DNS points to this server
+      fail:
+        msg: "DNS record for {{ site_domain }} points to {{ dns_result.stdout.strip() }}, but this server IP is {{ server_ip.stdout.strip() }}. Please update DNS A record."
+      when: dns_result.stdout.strip() != server_ip.stdout.strip()
+      delegate_to: localhost
+      run_once: true
+      become: no
+
     - name: Display server setup information
       debug:
         msg: |
           ========================================
           НАСТРОЙКА СЕРВЕРА ДЛЯ РАЗВЕРТЫВАНИЯ ПРИЛОЖЕНИЙ
           Домен: {{ site_domain }}
+          DNS IP: {{ dns_result.stdout.strip() }}
+          Server IP: {{ server_ip.stdout.strip() }}
           Пользователь: {{ user_name }}
           ========================================
       delegate_to: localhost

@@ -4,14 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       domain:
-        description: 'Domain name for deployment'
+        description: 'Domain name for server setup (DNS A record must point to server)'
         required: true
         default: 'web.test.ru'
-        type: string
-      server_ip:
-        description: 'Server IPv4 address'
-        required: true
-        default: '123.123.123.123'
         type: string
 
 jobs:
@@ -28,13 +23,49 @@ jobs:
         sudo apt-get install -y ansible
         ansible --version
 
+    - name: Check SSH key
+      run: |
+        if [ ! -f ~/.ssh/id_rsa ]; then
+          echo "❌ SSH private key not found at ~/.ssh/id_rsa"
+          echo "Please ensure SSH key is properly configured in GitHub Secrets"
+          echo "::error::SSH key validation failed"
+          exit 1
+        else
+          echo "✅ SSH private key found"
+        fi
+
+    - name: Check DNS resolution
+      run: |
+        echo "🔍 Checking DNS resolution for ${{ inputs.domain }}..."
+        DNS_IP=$(dig +short ${{ inputs.domain }} | head -n1)
+        if [ -z "$DNS_IP" ]; then
+          echo "❌ DNS record for ${{ inputs.domain }} not found!"
+          echo "Please configure DNS A record pointing to your server"
+          echo "::error::DNS resolution failed for ${{ inputs.domain }}"
+          exit 1
+        else
+          echo "✅ DNS: ${{ inputs.domain }} -> $DNS_IP"
+        fi
+
+    - name: Check server connectivity
+      run: |
+        echo "🔍 Checking server connectivity..."
+        if ping -c 1 ${{ inputs.domain }} > /dev/null 2>&1; then
+          echo "✅ Server is reachable"
+        else
+          echo "❌ Server is not reachable via ping"
+          echo "Please ensure server is running and accessible"
+          echo "::error::Server connectivity check failed for ${{ inputs.domain }}"
+          exit 1
+        fi
+
     - name: Display setup information
       run: |
         echo "========================================="
         echo "🚀 SERVER SETUP"
         echo "========================================="
         echo "🌐 Domain: ${{ inputs.domain }}"
-        echo "🔗 IP Address: ${{ inputs.server_ip }}"
+        echo "🔗 DNS IP: $(dig +short ${{ inputs.domain }} | head -n1)"
         echo "========================================="
 
     - name: Create SSH key file
@@ -47,7 +78,7 @@ jobs:
     - name: Setup server
       run: |
         cd ansible
-        ansible-playbook -i "${{ inputs.server_ip }}," playbook-server.yml \
+        ansible-playbook -i "${{ inputs.domain }}," playbook-server.yml \
           --private-key=~/.ssh/id_rsa \
           -u root \
           -e "site_domain=${{ inputs.domain }}"
@@ -58,13 +89,11 @@ jobs:
       if: always()
       run: |
         DOMAIN="${{ inputs.domain }}"
-        IP="${{ inputs.server_ip }}"
         
         echo "========================================="
         if [ ${{ job.status }} == 'success' ]; then
           echo "✅ Server setup successful!"
           echo "🌐 Domain: https://$DOMAIN"
-          echo "🔗 IP Address: $IP"
           echo "🐳 Portainer: https://$DOMAIN/portainer/"
           echo "🚦 Traefik: https://$DOMAIN/traefik/"
           echo "========================================="
@@ -75,6 +104,10 @@ jobs:
         else
           echo "❌ Server setup failed!"
           echo "🔍 Check the logs above for details"
+          echo "💡 Make sure:"
+          echo "   - DNS A record points to this server"
+          echo "   - SSH key is properly configured"
+          echo "   - Server is accessible"
         fi
         echo "========================================="
 

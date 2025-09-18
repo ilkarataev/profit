@@ -1,0 +1,28 @@
+networks:
+  backend:
+    external: true
+    name: reverse-proxy-docker-traefik_routing
+services:
+  mspartners-avito:
+    restart: always
+    image: registry.gitlab.com/getamo/private/mspartners/mspartners_avito:latest
+    ports:
+      - "3030:3030"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=reverse-proxy-docker-traefik_routing"
+      # https
+      - "traefik.http.routers.mspartners-avito.rule=Host(`msavito.getamo.ru`)"
+      - "traefik.http.routers.mspartners-avito.tls=true"
+      - "traefik.http.routers.mspartners-avito.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.mspartners-avito.entrypoints=websecure"
+      # http (redirect to https)
+      - "traefik.http.routers.mspartners-avito-http.rule=Host(`msavito.getamo.ru`)"
+      - "traefik.http.routers.mspartners-avito-http.entrypoints=web"
+      - "traefik.http.routers.mspartners-avito-http.middlewares=redirect-to-https@file"
+    networks:
+     - backend
+    volumes:
+      - mspartners-avito:/usr/src/app/temp
+volumes:
+  mspartners-avito:
