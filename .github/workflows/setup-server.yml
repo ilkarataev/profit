@@ -23,17 +23,6 @@ jobs:
         sudo apt-get install -y ansible
         ansible --version
 
-    - name: Check SSH key
-      run: |
-        if [ ! -f ~/.ssh/id_rsa ]; then
-          echo "❌ SSH private key not found at ~/.ssh/id_rsa"
-          echo "Please ensure SSH key is properly configured in GitHub Secrets"
-          echo "::error::SSH key validation failed"
-          exit 1
-        else
-          echo "✅ SSH private key found"
-        fi
-
     - name: Check DNS resolution
       run: |
         echo "🔍 Checking DNS resolution for ${{ inputs.domain }}..."
