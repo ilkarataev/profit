@@ -6,6 +6,15 @@
     ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
   # become: true
   tasks:
+    - name: Fail if site_domain is not provided
+      fail:
+        msg: "site_domain variable is required but not provided"
+      when: site_domain is not defined or site_domain == ""
+
+    - name: Set default values for variables
+      set_fact:
+        user_name: "{{ user_name | default('appuser') }}"
+
     - name: Ensure Python is installed
       raw: test -e /usr/bin/python3 || (apt-get update && apt-get install -y python3)
 
@@ -38,27 +47,70 @@
         state: latest
         update_cache: true
 
-    - name: Add Docker GPG apt Key
-      apt_key:
+    - name: Remove conflicting packages
+      ansible.builtin.apt:
+        name:
+          - containerd
+        state: absent
+        purge: yes
+      ignore_errors: yes
+
+    - name: Add Docker GPG key
+      ansible.builtin.apt_key:
         url: https://download.docker.com/linux/ubuntu/gpg
         state: present
 
-    - name: Add Docker Repository
-      apt_repository:
-        repo: deb https://download.docker.com/linux/ubuntu focal stable
+    - name: Add Docker repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
         state: present
 
-    - name: Update apt and install docker-ce
-      apt:
-        name: docker-ce
-        state: latest
-        update_cache: true
+    - name: Install Docker Engine
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+        update_cache: yes
 
-    - name: Update apt and install docker-compose
-      apt:
-        name: docker-compose
-        state: latest
-        update_cache: true
+    - name: Ensure docker service is running
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Wait for Docker daemon to be ready
+      ansible.builtin.shell: |
+        timeout 60 bash -c 'until docker info >/dev/null 2>&1; do sleep 2; done'
+      register: docker_wait
+      retries: 30
+      delay: 2
+      until: docker_wait.rc == 0
+      ignore_errors: yes
+
+    - name: Verify Docker is working
+      ansible.builtin.shell: docker info
+      register: docker_info
+      retries: 5
+      delay: 2
+      until: docker_info.rc == 0
+
+    - name: Add appuser to docker group
+      ansible.builtin.user:
+        name: "{{ user_name }}"
+        groups: docker
+        append: yes
+
+    - name: Verify Docker Compose is available
+      ansible.builtin.shell: docker compose version
+      register: docker_compose_check
+      ignore_errors: yes
+
+    - name: Display Docker Compose version
+      ansible.builtin.debug:
+        msg: "Docker Compose version: {{ docker_compose_check.stdout if docker_compose_check.rc == 0 else 'Not available' }}"
 
     - name: Add history settings to .bashrc root
       lineinfile:
@@ -159,49 +211,6 @@
       community.docker.docker_volume:
         name: traefik-letsencrypt
 
-    - name: Deploy Portainer container
-      community.docker.docker_container:
-        name: portainer
-        image: portainer/portainer-ce:2.33.1
-        state: started
-        restart_policy: always
-        volumes:
-          - /var/run/docker.sock:/var/run/docker.sock
-          - /opt/portainer:/data
-        networks:
-          - name: reverse-proxy
-        labels:
-          traefik.enable: "true"
-          traefik.docker.network: "reverse-proxy"
-          traefik.http.routers.portainer.rule: "Host(`{{ site_domain | default('localhost') }}`) && PathPrefix(`/portainer/`)"
-          traefik.http.routers.portainer.tls: "true"
-          traefik.http.routers.portainer.tls.certresolver: "letsencrypt"
-          traefik.http.routers.portainer.entrypoints: "websecure"
-          traefik.http.routers.portainer.middlewares: "portainer-stripprefix"
-          traefik.http.routers.portainer.service: "portainer"
-          traefik.http.services.portainer.loadbalancer.server.port: "9000"
-          traefik.http.middlewares.portainer-stripprefix.stripprefix.prefixes: "/portainer"
-          traefik.http.routers.portainer-http.rule: "Host(`{{ site_domain | default('localhost') }}`) && PathPrefix(`/portainer/`)"
-          traefik.http.routers.portainer-http.entrypoints: "web"
-          traefik.http.routers.portainer-http.middlewares: "portainer-stripprefix"
-          traefik.http.routers.portainer-http.service: "portainer"
-        env:
-          PORTAINER_HTTP_ENABLED: "true"
-
-    - name: Wait for Portainer to start
-      shell: |
-        for i in {1..30}; do
-          if docker exec traefik wget -qO- http://portainer:9000/api/status >/dev/null 2>&1; then
-            echo "Portainer is ready"
-            exit 0
-          fi
-          sleep 2
-        done
-        echo "Portainer startup timeout"
-        exit 1
-      register: portainer_wait_result
-      ignore_errors: true
-
     - name: Deploy Traefik reverse proxy
       community.docker.docker_container:
         name: traefik
@@ -232,7 +241,7 @@
           - name: reverse-proxy
         labels:
           traefik.enable: "true"
-          traefik.http.routers.traefik.rule: "Host(`{{ site_domain | default('localhost') }}`) && PathPrefix(`/traefik/`)"
+          traefik.http.routers.traefik.rule: "Host(`{{ site_domain }}`) && PathPrefix(`/traefik/`)"
           traefik.http.routers.traefik.tls: "true"
           traefik.http.routers.traefik.tls.certresolver: "letsencrypt"
           traefik.http.routers.traefik.entrypoints: "websecure"
@@ -274,22 +283,65 @@
     - name: Wait for Traefik to start
       shell: |
         for i in {1..30}; do
-          if docker exec traefik wget -qO- http://portainer:9000/api/status >/dev/null 2>&1; then
-            echo "Traefik and Portainer are ready"
+          if docker exec traefik wget -qO- http://localhost:8080/api/rawdata >/dev/null 2>&1; then
+            echo "Traefik is ready"
             exit 0
           fi
           sleep 2
         done
-        echo "Traefik/Portainer startup timeout"
+        echo "Traefik startup timeout"
         exit 1
       register: traefik_wait_result
       ignore_errors: true
 
+    - name: Deploy Portainer container
+      community.docker.docker_container:
+        name: portainer
+        image: portainer/portainer-ce:2.33.1
+        state: started
+        restart_policy: always
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+          - /opt/portainer:/data
+        networks:
+          - name: reverse-proxy
+        labels:
+          traefik.enable: "true"
+          traefik.docker.network: "reverse-proxy"
+          traefik.http.routers.portainer.rule: "Host(`{{ site_domain }}`) && PathPrefix(`/portainer/`)"
+          traefik.http.routers.portainer.tls: "true"
+          traefik.http.routers.portainer.tls.certresolver: "letsencrypt"
+          traefik.http.routers.portainer.entrypoints: "websecure"
+          traefik.http.routers.portainer.middlewares: "portainer-stripprefix"
+          traefik.http.routers.portainer.service: "portainer"
+          traefik.http.services.portainer.loadbalancer.server.port: "9000"
+          traefik.http.middlewares.portainer-stripprefix.stripprefix.prefixes: "/portainer"
+          traefik.http.routers.portainer-http.rule: "Host(`{{ site_domain }}`) && PathPrefix(`/portainer/`)"
+          traefik.http.routers.portainer-http.entrypoints: "web"
+          traefik.http.routers.portainer-http.middlewares: "portainer-stripprefix"
+          traefik.http.routers.portainer-http.service: "portainer"
+        env:
+          PORTAINER_HTTP_ENABLED: "true"
+
+    - name: Wait for Portainer to start
+      shell: |
+        for i in {1..20}; do
+          if docker exec portainer wget -qO- http://localhost:9000/api/status >/dev/null 2>&1; then
+            echo "Portainer is ready"
+            exit 0
+          fi
+          sleep 10
+        done
+        echo "Portainer startup timeout"
+        exit 1
+      register: portainer_wait_result
+      ignore_errors: true
+
     - name: Initialize Portainer admin user via Docker exec
       shell: |
-        docker exec traefik wget -qO- --post-data='{"Username": "admin", "Password": "{{ common_password.stdout }}"}' \
+        docker exec portainer wget -qO- --post-data='{"Username": "admin", "Password": "{{ common_password.stdout }}"}' \
           --header='Content-Type: application/json' \
-          http://portainer:9000/api/users/admin/init
+          http://localhost:9000/api/users/admin/init
       register: portainer_init_result
       ignore_errors: true
 

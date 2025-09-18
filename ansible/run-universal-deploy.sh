@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Universal Application Deployment Script
-# Usage: ./run-universal-deploy.sh <domain> <ip_address> <client_name> [additional_vars]
+# Usage: ./run-universal-deploy.sh <domain> <client_name> [additional_vars]
 
 set -e
 
@@ -15,15 +15,14 @@ NC='\033[0m' # No Color
 # Function to display usage
 usage() {
     echo -e "${BLUE}Usage:${NC}"
-    echo "  $0 <domain> <ip_address> <client_name> [additional_vars]"
+    echo "  $0 <domain> <client_name> [additional_vars]"
     echo ""
     echo -e "${BLUE}Examples:${NC}"
-    echo "  $0 app.example.com 192.168.1.100 client1"
-    echo "  $0 app.example.com 192.168.1.100 client1 \"redis_password=mypass webhook_url=https://webhook.example.com\""
+    echo "  $0 app.example.com client1"
+    echo "  $0 app.example.com client1 \"redis_password=mypass webhook_url=https://webhook.example.com\""
     echo ""
     echo -e "${BLUE}Required parameters:${NC}"
-    echo "  domain        - Domain name for the application"
-    echo "  ip_address    - Server IP address"
+    echo "  domain        - Domain name for the application (IP will be resolved from DNS)"
     echo "  client_name   - Client identifier (used for container names)"
     echo ""
     echo -e "${BLUE}Optional parameters:${NC}"
@@ -46,7 +45,7 @@ if [[ "$1" == "-h" || "$1" == "--help" ]]; then
 fi
 
 # Check minimum required parameters
-if [[ $# -lt 3 ]]; then
+if [[ $# -lt 2 ]]; then
     echo -e "${RED}Error: Missing required parameters${NC}"
     echo ""
     usage
@@ -54,15 +53,24 @@ if [[ $# -lt 3 ]]; then
 fi
 
 DOMAIN="$1"
-IP_ADDRESS="$2"
-CLIENT_NAME="$3"
-shift 3
+CLIENT_NAME="$2"
+shift 2
 
 # Additional variables
 ADDITIONAL_VARS=""
 if [[ $# -gt 0 ]]; then
     ADDITIONAL_VARS="$*"
 fi
+
+# DNS resolution
+echo -e "${BLUE}🔍 Resolving DNS for $DOMAIN...${NC}"
+IP_ADDRESS=$(dig +short $DOMAIN | head -n1)
+if [ -z "$IP_ADDRESS" ]; then
+    echo -e "${RED}❌ DNS record for $DOMAIN not found!${NC}"
+    echo "Please configure DNS A record pointing to your server"
+    exit 1
+fi
+echo -e "${GREEN}✅ DNS: $DOMAIN -> $IP_ADDRESS${NC}"
 
 echo -e "${BLUE}=========================================${NC}"
 echo -e "${BLUE}🚀 UNIVERSAL APPLICATION DEPLOYMENT${NC}"

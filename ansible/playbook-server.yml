@@ -12,52 +12,6 @@
     - ssh_key.yml
 
   tasks:
-    - name: Install Docker Engine & compose plugin
-      ansible.builtin.apt:
-        name:
-          - docker.io
-          - docker-compose
-        state: present
-        update_cache: yes
-
-    - name: Ensure docker service is running
-      ansible.builtin.service:
-        name: docker
-        state: started
-        enabled: true
-
-    - name: Wait for Docker daemon to be ready
-      ansible.builtin.shell: |
-        timeout 60 bash -c 'until docker info >/dev/null 2>&1; do sleep 2; done'
-      register: docker_wait
-      retries: 30
-      delay: 2
-      until: docker_wait.rc == 0
-      ignore_errors: yes
-
-    - name: Verify Docker is working
-      ansible.builtin.shell: docker info
-      register: docker_info
-      retries: 5
-      delay: 2
-      until: docker_info.rc == 0
-
-    - name: Add appuser to docker group
-      ansible.builtin.user:
-        name: "{{ user_name }}"
-        groups: docker
-        append: yes
-
-    - name: Install Docker Compose V2 (if needed)
-      ansible.builtin.shell: |
-        if ! command -v docker compose >/dev/null 2>&1; then
-          echo "Installing Docker Compose V2..."
-          curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-          chmod +x /usr/local/bin/docker-compose
-        else
-          echo "Docker Compose V2 already installed"
-        fi
-      ignore_errors: yes
 
     - name: Display server setup information
       debug:
@@ -132,9 +86,6 @@
       become: no
 
 - import_playbook: common-setup.yml
-  vars:
-    site_domain: "{{ site_domain }}"
-    user_name: "{{ user_name }}"
 
 
 - name: Display final credentials

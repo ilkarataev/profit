@@ -7,6 +7,10 @@
     app_dir: /home/{{ app_user }}/app
     client_name: "{{ client_name | default('main') }}"
     compose_file: docker-compose-universal.yml
+    redis_user: "{{ redis_user | default('') }}"
+    avito_api_url: "{{ avito_api_url | default('https://api.avito.ru') }}"
+    hh_api_url: "{{ hh_api_url | default('https://api.hh.ru') }}"
+    sentry_dsn: "{{ sentry_dsn | default('') }}"
 
   tasks:
     - name: Generate Redis password
@@ -24,6 +28,8 @@
           - "👤 Client: {{ client_name }}"
           - "🔗 IP Address: {{ ansible_host }}"
           - "🔐 Redis Password: {{ redis_password }}"
+          - "📁 Playbook dir: {{ playbook_dir }}"
+          - "📁 App dir: {{ app_dir }}"
           - "========================================="
 
     - name: Create application directory
@@ -34,6 +40,20 @@
         group: "{{ app_user }}"
         mode: '0755'
 
+    - name: Check if source files exist
+      stat:
+        path: "{{ item }}"
+      register: source_files
+      loop:
+        - "{{ playbook_dir }}/../avito-main"
+        - "{{ playbook_dir }}/../hh-main"
+        - "{{ playbook_dir }}/../docker-compose-universal.yml"
+
+    - name: Display source file status
+      debug:
+        msg: "{{ item.item }}: {{ 'exists' if item.stat.exists else 'missing' }}"
+      loop: "{{ source_files.results }}"
+
     - name: Copy application code
       copy:
         src: "{{ item }}"
@@ -41,9 +61,9 @@
         owner: "{{ app_user }}"
         group: "{{ app_user }}"
       loop:
-        - avito-main
-        - hh-main
-        - docker-compose-universal.yml
+        - "{{ playbook_dir }}/../avito-main"
+        - "{{ playbook_dir }}/../hh-main"
+        - "{{ playbook_dir }}/../docker-compose-universal.yml"
 
     - name: Create environment file
       template:
@@ -63,9 +83,9 @@
         hh_api_url: "{{ hh_api_url | default('https://api.hh.ru') }}"
         webhook_url_avito: "{{ webhook_url_avito }}"
         webhook_url_hh: "{{ webhook_url_hh }}"
-        base_url: "https://{{ site_domain }}"
-        base_url_avito: "https://{{ site_domain }}/avito"
-        base_url_hh: "https://{{ site_domain }}/hh"
+        BASE_URL: "https://{{ site_domain }}"
+        BASE_URL_AVITO: "https://{{ site_domain }}/avito"
+        BASE_URL_HH: "https://{{ site_domain }}/hh"
         sentry_dsn: "{{ sentry_dsn | default('') }}"
 
     - name: Stop existing containers
@@ -102,6 +122,7 @@
       loop:
         - "redis_data_{{ client_name }}"
 
+
     - name: Deploy application
       community.docker.docker_compose_v2:
         project_src: "{{ app_dir }}"
@@ -112,21 +133,6 @@
         recreate: always
       become: yes
       become_user: "{{ app_user }}"
-      env:
-        CLIENT_NAME: "{{ client_name }}"
-        DOMAIN: "{{ site_domain }}"
-        REDIS_PASSWORD: "{{ redis_password }}"
-        REDIS_USER: "{{ redis_user | default('') }}"
-        AVITO_API_URL: "{{ avito_api_url | default('https://api.avito.ru') }}"
-        HH_CLIENT_ID: "{{ hh_client_id }}"
-        HH_CLIENT_SECRET: "{{ hh_client_secret }}"
-        HH_API_URL: "{{ hh_api_url | default('https://api.hh.ru') }}"
-        WEBHOOK_URL_AVITO: "{{ webhook_url_avito }}"
-        WEBHOOK_URL_HH: "{{ webhook_url_hh }}"
-        BASE_URL: "https://{{ site_domain }}"
-        BASE_URL_AVITO: "https://{{ site_domain }}/avito"
-        BASE_URL_HH: "https://{{ site_domain }}/hh"
-        SENTRY_DSN: "{{ sentry_dsn | default('') }}"
 
     - name: Wait for services to start
       pause:

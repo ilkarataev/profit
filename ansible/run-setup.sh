@@ -32,13 +32,6 @@ if [ ! -f "$HOME/.ssh/id_rsa" ]; then
     echo "Создайте SSH ключ: ssh-keygen -t rsa -b 4096 -C 'server-deploy'"
     exit 1
 fi
-
-# Проверка наличия inventory файла
-if [ ! -f "inventory.ini" ]; then
-    echo "❌ Файл inventory.ini не найден"
-    exit 1
-fi
-
 # Проверка наличия SSH ключа в ssh_key.yml
 if [ ! -f "ssh_key.yml" ]; then
     echo "❌ Файл ssh_key.yml не найден"
@@ -50,21 +43,13 @@ fi
 echo "🔧 Запуск настройки сервера..."
 
 # Запуск playbook
-if [ -n "$IP_ADDRESS" ]; then
-    # Используем IP адрес напрямую
-    ansible-playbook -i "$IP_ADDRESS," playbook-server.yml \
-        --private-key="$HOME/.ssh/id_rsa" \
-        -u root \
-        -e "site_domain=$DOMAIN" \
-        -v
-else
-    # Используем inventory файл
-    ansible-playbook -i inventory.ini playbook-server.yml \
-        --private-key="$HOME/.ssh/id_rsa" \
-        -u root \
-        -e "site_domain=$DOMAIN" \
-        -v
-fi
+echo "🚀 Запуск настройки сервера на IP: $DNS_IP"
+
+ansible-playbook -i "$DNS_IP," playbook-server.yml \
+    --private-key="$HOME/.ssh/id_rsa" \
+    -u root \
+    -e "site_domain=$DOMAIN" \
+    -v
 
 echo "========================================"
 echo "✅ НАСТРОЙКА ЗАВЕРШЕНА!"
