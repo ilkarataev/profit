@@ -36,10 +36,8 @@ jobs:
         if ping -c 1 ${{ inputs.domain }} > /dev/null 2>&1; then
           echo "✅ Server is reachable"
         else
-          echo "❌ Server is not reachable via ping"
-          echo "Please ensure server is running and accessible"
-          echo "::error::Server connectivity check failed for ${{ inputs.domain }}"
-          exit 1
+          echo "⚠️  Server is not reachable via ping (this is normal for some networks)"
+          echo "ℹ️  Continuing with deployment - SSH connection will be tested during Ansible run"
         fi
 
     - name: Setup Ansible
@@ -59,6 +57,9 @@ jobs:
         echo "========================================="
         echo "🌐 Domain: ${{ inputs.domain }}"
         echo "🔗 DNS IP: $(dig +short ${{ inputs.domain }} | head -n1)"
+        echo "========================================="
+        echo "ℹ️  Note: If ping fails, this is normal for some networks"
+        echo "ℹ️  SSH connection will be tested during Ansible execution"
         echo "========================================="
 
     - name: Create SSH key file
