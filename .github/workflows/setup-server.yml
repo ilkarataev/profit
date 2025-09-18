@@ -20,7 +20,8 @@ jobs:
 
     - name: Install required packages
       run: |
-        apk add --no-cache bind-tools iputils
+        apt-get update
+        apt-get install -y dnsutils iputils-ping
         which dig
         dig --version
 
