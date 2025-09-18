@@ -80,7 +80,7 @@
       ignore_errors: yes
 
     - name: Remove old containers
-      docker_container:
+      community.docker.docker_container:
         name: "{{ item }}"
         state: absent
         force: yes
@@ -93,7 +93,7 @@
         - "redis-{{ client_name }}"
 
     - name: Remove old volumes
-      docker_volume:
+      community.docker.docker_volume:
         name: "{{ item }}"
         state: absent
       become: yes
@@ -133,7 +133,7 @@
         seconds: 10
 
     - name: Check service health
-      docker_container_info:
+      community.docker.docker_container_info:
         name: "{{ item }}"
       register: container_info
       loop:
