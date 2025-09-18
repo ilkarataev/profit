@@ -12,34 +12,15 @@ on:
 jobs:
   setup:
     runs-on: ubuntu-24.04
-    container: ghcr.io/ansible/creator-ee:latest  # официальный EE образ
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Install required packages
-      run: |
-        apt-get update
-        apt-get install -y dnsutils iputils-ping
-        which dig
-        dig --version
-
-    - name: Install Ansible collections
-      run: |
-        ansible-galaxy collection install -r ansible/requirements.yml
-
     - name: Check DNS resolution
       run: |
         echo "🔍 Checking DNS resolution for ${{ inputs.domain }}..."
-        # Try dig first, then nslookup as fallback
-        if command -v dig >/dev/null 2>&1; then
-          DNS_IP=$(dig +short ${{ inputs.domain }} | head -n1)
-        else
-          echo "dig not found, trying nslookup..."
-          DNS_IP=$(nslookup ${{ inputs.domain }} | grep -A1 "Name:" | grep "Address:" | awk '{print $2}' | head -n1)
-        fi
-        
+        DNS_IP=$(dig +short ${{ inputs.domain }} | head -n1)
         if [ -z "$DNS_IP" ]; then
           echo "❌ DNS record for ${{ inputs.domain }} not found!"
           echo "Please configure DNS A record pointing to your server"
@@ -61,6 +42,16 @@ jobs:
           exit 1
         fi
 
+    - name: Setup Ansible
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ansible
+        ansible --version
+
+    - name: Install Ansible collections
+      run: |
+        ansible-galaxy collection install -r ansible/requirements.yml
+
     - name: Display setup information
       run: |
         echo "========================================="
@@ -70,15 +61,18 @@ jobs:
         echo "🔗 DNS IP: $(dig +short ${{ inputs.domain }} | head -n1)"
         echo "========================================="
 
-    - name: Start SSH agent
-      uses: webfactory/ssh-agent@v0.9.0
-      with:
-        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+    - name: Create SSH key file
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keygen -y -f ~/.ssh/id_rsa > ~/.ssh/id_rsa.pub
 
     - name: Setup server
       run: |
         cd ansible
         ansible-playbook -i "${{ inputs.domain }}," playbook-server.yml \
+          --private-key=~/.ssh/id_rsa \
           -u root \
           -e "site_domain=${{ inputs.domain }}"
       env:
@@ -109,4 +103,9 @@ jobs:
           echo "   - Server is accessible"
         fi
         echo "========================================="
+
+    - name: Cleanup SSH key
+      if: always()
+      run: |
+        rm -f ~/.ssh/id_rsa ~/.ssh/id_rsa.pub
 
