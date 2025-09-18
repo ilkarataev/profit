@@ -103,7 +103,7 @@
         mode: '0755'
 
     - name: Create Portainer Docker network
-      docker_network:
+      community.docker.docker_network:
         name: portainer
         state: present
 
@@ -147,16 +147,16 @@
       when: common_password is defined
 
     - name: Create reverse proxy network
-      docker_network:
+      community.docker.docker_network:
         name: reverse-proxy
         state: present
 
     - name: Create Traefik Let's Encrypt volume
-      docker_volume:
+      community.docker.docker_volume:
         name: traefik-letsencrypt
 
     - name: Deploy Portainer container
-      docker_container:
+      community.docker.docker_container:
         name: portainer
         image: portainer/portainer-ce:2.33.1
         state: started
@@ -199,7 +199,7 @@
       ignore_errors: true
 
     - name: Deploy Traefik reverse proxy
-      docker_container:
+      community.docker.docker_container:
         name: traefik
         image: traefik:v3.5.2
         state: started
