@@ -18,6 +18,12 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Install required packages
+      run: |
+        apk add --no-cache bind-tools iputils
+        which dig
+        dig --version
+
     - name: Install Ansible collections
       run: |
         ansible-galaxy collection install -r ansible/requirements.yml
@@ -25,7 +31,14 @@ jobs:
     - name: Check DNS resolution
       run: |
         echo "🔍 Checking DNS resolution for ${{ inputs.domain }}..."
-        DNS_IP=$(dig +short ${{ inputs.domain }} | head -n1)
+        # Try dig first, then nslookup as fallback
+        if command -v dig >/dev/null 2>&1; then
+          DNS_IP=$(dig +short ${{ inputs.domain }} | head -n1)
+        else
+          echo "dig not found, trying nslookup..."
+          DNS_IP=$(nslookup ${{ inputs.domain }} | grep -A1 "Name:" | grep "Address:" | awk '{print $2}' | head -n1)
+        fi
+        
         if [ -z "$DNS_IP" ]; then
           echo "❌ DNS record for ${{ inputs.domain }} not found!"
           echo "Please configure DNS A record pointing to your server"
