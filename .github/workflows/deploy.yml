@@ -4,209 +4,63 @@ on:
   workflow_dispatch:
     inputs:
       domain:
-        description: 'Domain name for deployment (DNS A record must point to server)'
+        description: 'Domain name'
         required: true
         default: 'web.test.ru'
         type: string
       client_name:
-        description: 'Client identifier (used for container names)'
+        description: 'Client identifier'
         required: true
         default: 'main'
         type: string
       action:
-        description: 'Action to perform'
+        description: 'Action'
         required: true
         default: 'deploy'
         type: choice
-        options:
-          - deploy
-          - update
+        options: [deploy, update]
 
 jobs:
   deploy:
     runs-on: ubuntu-24.04
-    
+    container: ghcr.io/ansible/creator-ee:latest  # официальный EE образ
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Setup Ansible
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y ansible
-        ansible --version
+      - name: Start SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-        - name: Check SSH key
-          run: |
-            if [ ! -f ~/.ssh/id_rsa ]; then
-              echo "❌ SSH private key not found at ~/.ssh/id_rsa"
-              echo "Please ensure SSH key is properly configured in GitHub Secrets"
-              echo "::error::SSH key validation failed"
-              exit 1
-            else
-              echo "✅ SSH private key found"
-            fi
+      - name: Add host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ inputs.domain }} >> ~/.ssh/known_hosts
 
-    #     - name: Check DNS resolution
-    #       run: |
-    #         echo "🔍 Checking DNS resolution for ${{ inputs.domain }}..."
-    #         DNS_IP=$(dig +short ${{ inputs.domain }} | head -n1)
-    #         if [ -z "$DNS_IP" ]; then
-    #           echo "❌ DNS record for ${{ inputs.domain }} not found!"
-    #           echo "Please configure DNS A record pointing to your server"
-    #           echo "::error::DNS resolution failed for ${{ inputs.domain }}"
-    #           exit 1
-    #         else
-    #           echo "✅ DNS: ${{ inputs.domain }} -> $DNS_IP"
-    #         fi
+      - name: ansible --version
+        run: |
+          ansible --version
+          ansible-galaxy collection list || true
 
-    #     - name: Check required secrets and variables
-    #       run: |
-    #         echo "🔍 Checking required secrets and variables for client: ${{ inputs.client_name }}"
-            
-    #         # Check required secrets
-    #         if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
-    #           echo "❌ SSH_PRIVATE_KEY secret is missing"
-    #           echo "::error::SSH_PRIVATE_KEY secret is required"
-    #           exit 1
-    #         fi
-            
-    #         if [ -z "${{ secrets[format('{0}_HH_CLIENT_SECRET', inputs.client_name)] }}" ]; then
-    #           echo "❌ ${{ inputs.client_name }}_HH_CLIENT_SECRET secret is missing"
-    #           echo "::error::${{ inputs.client_name }}_HH_CLIENT_SECRET secret is required"
-    #           exit 1
-    #         fi
-            
-    #         # Check required variables
-    #         if [ -z "${{ vars[format('{0}_AVITO_API_URL', inputs.client_name)] }}" ]; then
-    #           echo "❌ ${{ inputs.client_name }}_AVITO_API_URL variable is missing"
-    #           echo "::error::${{ inputs.client_name }}_AVITO_API_URL variable is required"
-    #           exit 1
-    #         fi
-            
-    #         if [ -z "${{ vars[format('{0}_HH_CLIENT_ID', inputs.client_name)] }}" ]; then
-    #           echo "❌ ${{ inputs.client_name }}_HH_CLIENT_ID variable is missing"
-    #           echo "::error::${{ inputs.client_name }}_HH_CLIENT_ID variable is required"
-    #           exit 1
-    #         fi
-            
-    #         if [ -z "${{ vars[format('{0}_HH_API_URL', inputs.client_name)] }}" ]; then
-    #           echo "❌ ${{ inputs.client_name }}_HH_API_URL variable is missing"
-    #           echo "::error::${{ inputs.client_name }}_HH_API_URL variable is required"
-    #           exit 1
-    #         fi
-            
-    #         if [ -z "${{ vars[format('{0}_WEBHOOK_URL_AVITO', inputs.client_name)] }}" ]; then
-    #           echo "❌ ${{ inputs.client_name }}_WEBHOOK_URL_AVITO variable is missing"
-    #           echo "::error::${{ inputs.client_name }}_WEBHOOK_URL_AVITO variable is required"
-    #           exit 1
-    #         fi
-            
-    #         if [ -z "${{ vars[format('{0}_WEBHOOK_URL_HH', inputs.client_name)] }}" ]; then
-    #           echo "❌ ${{ inputs.client_name }}_WEBHOOK_URL_HH variable is missing"
-    #           echo "::error::${{ inputs.client_name }}_WEBHOOK_URL_HH variable is required"
-    #           exit 1
-    #         fi
-            
-    #         # Check optional variables
-    #         if [ -n "${{ secrets[format('{0}_SENTRY_DSN', inputs.client_name)] }}" ]; then
-    #           echo "✅ ${{ inputs.client_name }}_SENTRY_DSN secret is present (optional)"
-    #         else
-    #           echo "ℹ️  ${{ inputs.client_name }}_SENTRY_DSN secret is not set (optional)"
-    #         fi
-            
-    #         echo "✅ All required secrets and variables are present"
+      - name: Deploy / Update
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: |
+          cd ansible
+          ansible-playbook -i "${{ inputs.domain }}," deploy-universal.yml \
+            -u appuser \
+            -e "site_domain=${{ inputs.domain }}" \
+            -e "client_name=${{ inputs.client_name }}" \
+            -e "avito_api_url=${{ vars[format('{0}_AVITO_API_URL', inputs.client_name)] }}" \
+            -e "hh_client_id=${{ vars[format('{0}_HH_CLIENT_ID', inputs.client_name)] }}" \
+            -e "hh_client_secret=${{ secrets[format('{0}_HH_CLIENT_SECRET', inputs.client_name)] }}" \
+            -e "hh_api_url=${{ vars[format('{0}_HH_API_URL', inputs.client_name)] }}" \
+            -e "webhook_url_avito=${{ vars[format('{0}_WEBHOOK_URL_AVITO', inputs.client_name)] }}" \
+            -e "webhook_url_hh=${{ vars[format('{0}_WEBHOOK_URL_HH', inputs.client_name)] }}" \
+            -e "sentry_dsn=${{ secrets[format('{0}_SENTRY_DSN', inputs.client_name)] }}" \
+            $([ "${{ inputs.action }}" = "update" ] && echo "--tags update")
 
-    #     - name: Display deployment information
-    #       run: |
-    #         echo "========================================="
-    #         echo "🚀 UNIVERSAL APPLICATION DEPLOYMENT"
-    #         echo "========================================="
-    #         echo "🌐 Domain: ${{ inputs.domain }}"
-    #         echo "👤 Client: ${{ inputs.client_name }}"
-    #         echo "🔗 DNS IP: $(dig +short ${{ inputs.domain }} | head -n1)"
-    #         echo "🔧 Action: ${{ inputs.action }}"
-    #         echo "========================================="
-
-    # - name: Create SSH key file
-    #   run: |
-    #     mkdir -p ~/.ssh
-    #     echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-    #     chmod 600 ~/.ssh/id_rsa
-    #     ssh-keygen -y -f ~/.ssh/id_rsa > ~/.ssh/id_rsa.pub
-
-    # - name: Deploy application
-    #   if: ${{ inputs.action == 'deploy' }}
-    #   run: |
-    #     cd ansible
-    #     ansible-playbook -i "${{ inputs.domain }}," deploy-universal.yml \
-    #       --private-key=~/.ssh/id_rsa \
-    #       -u appuser \
-    #       -e "site_domain=${{ inputs.domain }}" \
-    #       -e "client_name=${{ inputs.client_name }}" \
-    #       -e "avito_api_url=${{ vars[format('{0}_AVITO_API_URL', inputs.client_name)] }}" \
-    #       -e "hh_client_id=${{ vars[format('{0}_HH_CLIENT_ID', inputs.client_name)] }}" \
-    #       -e "hh_client_secret=${{ secrets[format('{0}_HH_CLIENT_SECRET', inputs.client_name)] }}" \
-    #       -e "hh_api_url=${{ vars[format('{0}_HH_API_URL', inputs.client_name)] }}" \
-    #       -e "webhook_url_avito=${{ vars[format('{0}_WEBHOOK_URL_AVITO', inputs.client_name)] }}" \
-    #       -e "webhook_url_hh=${{ vars[format('{0}_WEBHOOK_URL_HH', inputs.client_name)] }}" \
-    #       -e "sentry_dsn=${{ secrets[format('{0}_SENTRY_DSN', inputs.client_name)] }}"
-    #   env:
-    #     ANSIBLE_HOST_KEY_CHECKING: False
-
-    # - name: Update application
-    #   if: ${{ inputs.action == 'update' }}
-    #   run: |
-    #     cd ansible
-    #     ansible-playbook -i "${{ inputs.domain }}," deploy-universal.yml \
-    #       --private-key=~/.ssh/id_rsa \
-    #       -u appuser \
-    #       -e "site_domain=${{ inputs.domain }}" \
-    #       -e "client_name=${{ inputs.client_name }}" \
-    #       -e "avito_api_url=${{ vars[format('{0}_AVITO_API_URL', inputs.client_name)] }}" \
-    #       -e "hh_client_id=${{ vars[format('{0}_HH_CLIENT_ID', inputs.client_name)] }}" \
-    #       -e "hh_client_secret=${{ secrets[format('{0}_HH_CLIENT_SECRET', inputs.client_name)] }}" \
-    #       -e "hh_api_url=${{ vars[format('{0}_HH_API_URL', inputs.client_name)] }}" \
-    #       -e "webhook_url_avito=${{ vars[format('{0}_WEBHOOK_URL_AVITO', inputs.client_name)] }}" \
-    #       -e "webhook_url_hh=${{ vars[format('{0}_WEBHOOK_URL_HH', inputs.client_name)] }}" \
-    #       -e "sentry_dsn=${{ secrets[format('{0}_SENTRY_DSN', inputs.client_name)] }}" \
-    #       --tags update
-    #   env:
-    #     ANSIBLE_HOST_KEY_CHECKING: False
-
-    # - name: Notify deployment status
-    #   if: always()
-    #   run: |
-    #     DOMAIN="${{ inputs.domain }}"
-    #     ACTION="${{ inputs.action }}"
-    #     CLIENT="${{ inputs.client_name }}"
-        
-    #     echo "========================================="
-    #     if [ ${{ job.status }} == 'success' ]; then
-    #       echo "✅ $ACTION successful!"
-    #       echo "🌐 Domain: https://$DOMAIN"
-    #       echo "👤 Client: $CLIENT"
-    #       echo "========================================="
-    #       echo "📱 Services:"
-    #       echo "  • Avito API: https://$DOMAIN/avito/"
-    #       echo "  • HH API: https://$DOMAIN/hh/"
-    #       echo "  • Redis: redis-$CLIENT"
-    #       echo "========================================="
-    #       echo "🐳 Portainer: https://$DOMAIN/portainer/"
-    #       echo "🚦 Traefik: https://$DOMAIN/traefik/"
-    #       echo "========================================="
-    #       echo "📝 Next steps:"
-    #       echo "1. Check Portainer: https://$DOMAIN/portainer/"
-    #       echo "2. Check Traefik: https://$DOMAIN/traefik/"
-    #       echo "3. Test Avito API: https://$DOMAIN/avito/"
-    #       echo "4. Test HH API: https://$DOMAIN/hh/"
-    #     else
-    #       echo "❌ $ACTION failed!"
-    #       echo "🔍 Check the logs above for details"
-    #     fi
-    #     echo "========================================="
-
-    - name: Cleanup SSH key
-      if: always()
-      run: |
-        rm -f ~/.ssh/id_rsa ~/.ssh/id_rsa.pub
+      - name: Cleanup SSH key
+        if: always()
+        run: ssh-add -D || true
