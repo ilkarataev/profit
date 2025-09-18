@@ -102,6 +102,10 @@
         group: root
         mode: '0755'
 
+    - name: Wait a moment for Docker to be fully ready
+      ansible.builtin.pause:
+        seconds: 5
+
     - name: Create Portainer Docker network
       community.docker.docker_network:
         name: portainer

@@ -26,6 +26,22 @@
         state: started
         enabled: true
 
+    - name: Wait for Docker daemon to be ready
+      ansible.builtin.shell: |
+        timeout 60 bash -c 'until docker info >/dev/null 2>&1; do sleep 2; done'
+      register: docker_wait
+      retries: 30
+      delay: 2
+      until: docker_wait.rc == 0
+      ignore_errors: yes
+
+    - name: Verify Docker is working
+      ansible.builtin.shell: docker info
+      register: docker_info
+      retries: 5
+      delay: 2
+      until: docker_info.rc == 0
+
     - name: Add appuser to docker group
       ansible.builtin.user:
         name: "{{ user_name }}"
