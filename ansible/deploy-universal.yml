@@ -69,7 +69,7 @@
         sentry_dsn: "{{ sentry_dsn | default('') }}"
 
     - name: Stop existing containers
-      docker_compose:
+      community.docker.docker_compose_v2:
         project_src: "{{ app_dir }}"
         files:
           - "{{ compose_file }}"
@@ -103,7 +103,7 @@
         - "redis_data_{{ client_name }}"
 
     - name: Deploy application
-      docker_compose:
+      community.docker.docker_compose_v2:
         project_src: "{{ app_dir }}"
         files:
           - "{{ compose_file }}"
