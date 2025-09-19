@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
 import { AvitoModule } from './avito/avito.module'
+import { HealthController } from './health.controller'
 import { RedisModule } from '@songkeys/nestjs-redis'
 import { SentryModule } from '@sentry/nestjs/setup'
 import { APP_FILTER } from '@nestjs/core'
@@ -22,6 +23,7 @@ import { SentryGlobalFilter } from '@sentry/nestjs/setup'
             },
         }),
     ],
+    controllers: [HealthController],
     providers: [
         {
             provide: APP_FILTER,

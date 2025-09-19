@@ -1,4 +1,4 @@
-name: Deploy Universal Application
+name: Deploy Applications
 
 on:
   workflow_dispatch:
@@ -60,6 +60,30 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H ${{ inputs.domain }} >> ~/.ssh/known_hosts
 
+      - name: Parse client configuration
+        id: parse_config
+        run: |
+          # Получаем JSON конфигурацию клиента
+          CLIENT_CONFIG='${{ vars[format('{0}_CONFIG', inputs.client_name)] }}'
+          
+          # Проверяем, что конфигурация существует
+          if [ -z "$CLIENT_CONFIG" ] || [ "$CLIENT_CONFIG" = "null" ]; then
+            echo "❌ Configuration for client '${{ inputs.client_name }}' not found!"
+            echo "Please add CLIENT1_CONFIG variable with JSON configuration"
+            echo "::error::Client configuration not found"
+            exit 1
+          fi
+          
+          # Парсим JSON и извлекаем переменные
+          echo "avito_api_url=$(echo $CLIENT_CONFIG | jq -r '.avito_api_url // "https://api.avito.ru"')" >> $GITHUB_OUTPUT
+          echo "hh_client_id=$(echo $CLIENT_CONFIG | jq -r '.hh_client_id // ""')" >> $GITHUB_OUTPUT
+          echo "hh_api_url=$(echo $CLIENT_CONFIG | jq -r '.hh_api_url // "https://api.hh.ru"')" >> $GITHUB_OUTPUT
+          echo "webhook_url_avito=$(echo $CLIENT_CONFIG | jq -r '.webhook_url_avito // ""')" >> $GITHUB_OUTPUT
+          echo "webhook_url_hh=$(echo $CLIENT_CONFIG | jq -r '.webhook_url_hh // ""')" >> $GITHUB_OUTPUT
+          echo "sentry_dsn=$(echo $CLIENT_CONFIG | jq -r '.sentry_dsn // ""')" >> $GITHUB_OUTPUT
+          
+          echo "✅ Client configuration parsed successfully"
+
       - name: Deploy / Update
         run: |
           cd ansible
@@ -67,13 +91,13 @@ jobs:
             -u appuser \
             -e "site_domain=${{ inputs.domain }}" \
             -e "client_name=${{ inputs.client_name }}" \
-            -e "avito_api_url=${{ vars[format('{0}_AVITO_API_URL', inputs.client_name)] }}" \
-            -e "hh_client_id=${{ vars[format('{0}_HH_CLIENT_ID', inputs.client_name)] }}" \
-            -e "hh_client_secret=${{ secrets[format('{0}_HH_CLIENT_SECRET', inputs.client_name)] }}" \
-            -e "hh_api_url=${{ vars[format('{0}_HH_API_URL', inputs.client_name)] }}" \
-            -e "webhook_url_avito=${{ vars[format('{0}_WEBHOOK_URL_AVITO', inputs.client_name)] }}" \
-            -e "webhook_url_hh=${{ vars[format('{0}_WEBHOOK_URL_HH', inputs.client_name)] }}" \
-            -e "sentry_dsn=${{ secrets[format('{0}_SENTRY_DSN', inputs.client_name)] }}" \
+            -e "avito_api_url=${{ steps.parse_config.outputs.avito_api_url }}" \
+            -e "hh_client_id=${{ steps.parse_config.outputs.hh_client_id }}" \
+            -e "hh_client_secret=${{ secrets[format('{0}_CLIENT_SECRET', inputs.client_name)] }}" \
+            -e "hh_api_url=${{ steps.parse_config.outputs.hh_api_url }}" \
+            -e "webhook_url_avito=${{ steps.parse_config.outputs.webhook_url_avito }}" \
+            -e "webhook_url_hh=${{ steps.parse_config.outputs.webhook_url_hh }}" \
+            -e "sentry_dsn=${{ steps.parse_config.outputs.sentry_dsn }}" \
             $([ "${{ inputs.action }}" = "update" ] && echo "--tags update")
         env:
           ANSIBLE_HOST_KEY_CHECKING: False

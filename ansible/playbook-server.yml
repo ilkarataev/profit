@@ -25,6 +25,15 @@
       run_once: true
       become: no
 
+    - name: Fail if site_domain is not provided
+      fail:
+        msg: "site_domain variable is required but not provided"
+      when: site_domain is not defined or site_domain == ""
+
+    - name: Set default values for variables
+      set_fact:
+        user_name: "{{ user_name | default('appuser') }}"
+
     - name: Create user {{ user_name }}
       user:
         name: "{{ user_name }}"
@@ -70,6 +79,344 @@
       become: true
       become_user: "{{ user_name }}"
 
+    - name: Ensure Python is installed
+      raw: test -e /usr/bin/python3 || (apt-get update && apt-get install -y python3)
+
+    - name: Install apt
+      apt:
+        name: apt
+        state: latest
+        update_cache: true
+
+    - name: Install required system packages
+      apt:
+        pkg:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+          - python3-pip
+          - virtualenv
+          - python3-setuptools
+          - git
+          - unzip
+          - etckeeper
+          - wireguard
+          - apache2-utils
+          - fail2ban
+          - snapd
+          - iptables-persistent
+          - jq
+          - rsync
+        state: latest
+        update_cache: true
+
+    - name: Remove conflicting packages
+      ansible.builtin.apt:
+        name:
+          - containerd
+        state: absent
+        purge: yes
+      ignore_errors: yes
+
+    - name: Add Docker GPG key
+      ansible.builtin.apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+
+    - name: Install Docker Engine
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+        update_cache: yes
+
+    - name: Ensure docker service is running
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Wait for Docker daemon to be ready
+      ansible.builtin.shell: |
+        timeout 60 bash -c 'until docker info >/dev/null 2>&1; do sleep 2; done'
+      register: docker_wait
+      retries: 30
+      delay: 2
+      until: docker_wait.rc == 0
+      ignore_errors: yes
+
+    - name: Verify Docker is working
+      ansible.builtin.shell: docker info
+      register: docker_info
+      retries: 5
+      delay: 2
+      until: docker_info.rc == 0
+
+    - name: Add appuser to docker group
+      ansible.builtin.user:
+        name: "{{ user_name }}"
+        groups: docker
+        append: yes
+
+    - name: Verify Docker Compose is available
+      ansible.builtin.shell: docker compose version
+      register: docker_compose_check
+      ignore_errors: yes
+
+    - name: Display Docker Compose version
+      ansible.builtin.debug:
+        msg: "Docker Compose version: {{ docker_compose_check.stdout if docker_compose_check.rc == 0 else 'Not available' }}"
+
+    - name: Add history settings to .bashrc root
+      lineinfile:
+        path: /home/root/.bashrc
+        state: present
+        create: yes
+        line: "{{ item }}"
+      with_items:
+        - 'export HISTSIZE=10000'
+        - 'export HISTFILESIZE=10000'
+        - 'export HISTCONTROL=ignoreboth:erasedups'
+        - 'export HISTTIMEFORMAT="%d.%m.%Y %H:%M:%S: "'
+        - 'PROMPT_COMMAND="history -a"'
+
+    - name: Install Certbot using Snap
+      command: snap install --classic certbot
+
+    - name: Check if certbot exists and is not a symlink
+      stat:
+        path: /usr/bin/certbot
+      register: certbot_stat
+
+    - name: Remove existing certbot file if it's not a symlink
+      file:
+        path: /usr/bin/certbot
+        state: absent
+      when: certbot_stat.stat.exists and not certbot_stat.stat.islnk
+
+    - name: Create symlink for Certbot
+      file:
+        src: /snap/bin/certbot
+        dest: /usr/bin/certbot
+        state: link
+        force: yes
+
+    - name: Create Portainer data directory
+      file:
+        path: /opt/portainer
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Wait a moment for Docker to be fully ready
+      ansible.builtin.pause:
+        seconds: 5
+
+    - name: Create Portainer Docker network
+      community.docker.docker_network:
+        name: portainer
+        state: present
+
+    - name: Generate common password for Traefik and Portainer
+      shell: openssl rand -base64 32
+      register: common_password
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Generate Traefik password hash
+      shell: docker run --rm httpd:2.4-alpine htpasswd -nbB admin "{{ common_password.stdout }}"
+      register: traefik_password
+      run_once: true
+
+    - name: Create Traefik directory
+      file:
+        path: /opt/traefik
+        state: directory
+        mode: '0755'
+
+    - name: Create Traefik auth file
+      copy:
+        content: "{{ traefik_password.stdout }}"
+        dest: /opt/traefik/auth
+        mode: '0600'
+      when: traefik_password is defined
+
+    - name: Save common password for Portainer
+      copy:
+        content: "{{ common_password.stdout }}"
+        dest: /opt/portainer/portainer_password
+        mode: '0600'
+      when: common_password is defined
+
+    - name: Save common password for Traefik
+      copy:
+        content: "{{ common_password.stdout }}"
+        dest: /opt/traefik/traefik_password
+        mode: '0600'
+      when: common_password is defined
+
+    - name: Create reverse proxy network
+      community.docker.docker_network:
+        name: reverse-proxy
+        state: present
+
+    - name: Create Traefik Let's Encrypt volume
+      community.docker.docker_volume:
+        name: traefik-letsencrypt
+
+    - name: Deploy Traefik reverse proxy
+      community.docker.docker_container:
+        name: traefik
+        image: traefik:v3.5.2
+        state: started
+        restart_policy: always
+        ports:
+          - "80:80"
+          - "443:443"
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock:ro
+          - traefik-letsencrypt:/letsencrypt
+          - /opt/traefik/auth:/auth
+        command:
+          - --api.dashboard=true
+          - --api.insecure=false
+          - --providers.docker=true
+          - --providers.docker.exposedbydefault=false
+          - --providers.docker.network=reverse-proxy
+          - --entrypoints.web.address=:80
+          - --entrypoints.websecure.address=:443
+          - --certificatesresolvers.letsencrypt.acme.tlschallenge=true
+          - --certificatesresolvers.letsencrypt.acme.email=ilkarataev@gmail.com
+          - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+          - --entrypoints.web.http.redirections.entrypoint.to=websecure
+          - --entrypoints.web.http.redirections.entrypoint.scheme=https
+        networks:
+          - name: reverse-proxy
+        labels:
+          traefik.enable: "true"
+          traefik.http.routers.traefik.rule: "Host(`{{ site_domain }}`) && PathPrefix(`/traefik/`)"
+          traefik.http.routers.traefik.tls: "true"
+          traefik.http.routers.traefik.tls.certresolver: "letsencrypt"
+          traefik.http.routers.traefik.entrypoints: "websecure"
+          traefik.http.routers.traefik.service: "api@internal"
+          traefik.http.routers.traefik.middlewares: "traefik-auth,traefik-stripprefix"
+          traefik.http.middlewares.traefik-auth.basicauth.usersfile: "/auth"
+          traefik.http.middlewares.traefik-stripprefix.stripprefix.prefixes: "/traefik"
+
+    - name: Ensure fail2ban is installed
+      apt:
+        name: fail2ban
+        state: present
+        update_cache: true
+
+    - name: Ensure /etc/fail2ban/jail.local exists
+      file:
+        path: /etc/fail2ban/jail.local
+        state: touch
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Configure fail2ban for sshd
+      blockinfile:
+        path: /etc/fail2ban/jail.local
+        block: |
+          [sshd]
+          enabled   = true
+          maxretry  = 2
+          findtime  = 5h
+          bantime   = 30d
+          ignoreip  = 127.0.0.1/8
+
+    - name: Restart fail2ban service
+      service:
+        name: fail2ban
+        state: restarted
+
+    - name: Wait for Traefik to start
+      shell: |
+        for i in {1..30}; do
+          if docker exec traefik wget -qO- http://localhost:8080/api/rawdata >/dev/null 2>&1; then
+            echo "Traefik is ready"
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "Traefik startup timeout"
+        exit 1
+      register: traefik_wait_result
+      ignore_errors: true
+
+    - name: Deploy Portainer container
+      community.docker.docker_container:
+        name: portainer
+        image: portainer/portainer-ce:2.33.1
+        state: started
+        restart_policy: always
+        ports:
+          - "127.0.0.1:9000:9000"
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+          - /opt/portainer:/data
+        networks:
+          - name: reverse-proxy
+        labels:
+          traefik.enable: "true"
+          traefik.docker.network: "reverse-proxy"
+          traefik.http.routers.portainer.rule: "Host(`{{ site_domain }}`) && PathPrefix(`/portainer/`)"
+          traefik.http.routers.portainer.tls: "true"
+          traefik.http.routers.portainer.tls.certresolver: "letsencrypt"
+          traefik.http.routers.portainer.entrypoints: "websecure"
+          traefik.http.routers.portainer.middlewares: "portainer-stripprefix"
+          traefik.http.routers.portainer.service: "portainer"
+          traefik.http.services.portainer.loadbalancer.server.port: "9000"
+          traefik.http.middlewares.portainer-stripprefix.stripprefix.prefixes: "/portainer"
+          traefik.http.routers.portainer-http.rule: "Host(`{{ site_domain }}`) && PathPrefix(`/portainer/`)"
+          traefik.http.routers.portainer-http.entrypoints: "web"
+          traefik.http.routers.portainer-http.middlewares: "portainer-stripprefix"
+          traefik.http.routers.portainer-http.service: "portainer"
+        env:
+          PORTAINER_HTTP_ENABLED: "true"
+
+    - name: Wait for Portainer to start
+      shell: |
+        for i in {1..20}; do
+          if curl -s http://127.0.0.1:9000/api/status >/dev/null 2>&1; then
+            echo "Portainer is ready"
+            exit 0
+          fi
+          sleep 10
+        done
+        echo "Portainer startup timeout"
+        exit 1
+      register: portainer_wait_result
+      ignore_errors: true
+
+    - name: Initialize Portainer admin user
+      shell: |
+        curl -s -X POST \
+          -H "Content-Type: application/json" \
+          -d '{"Username": "admin", "Password": "{{ common_password.stdout }}"}' \
+          http://127.0.0.1:9000/api/users/admin/init
+      register: portainer_init_result
+      ignore_errors: true
+
+    - name: Display Portainer initialization result
+      debug:
+        msg: "Portainer initialization: {{ portainer_init_result.stdout if portainer_init_result.rc == 0 else 'Failed' }}"
+      when: portainer_init_result is defined
+
     - name: Display setup completion
       debug:
         msg: |
@@ -84,8 +431,6 @@
       delegate_to: localhost
       run_once: true
       become: no
-
-- import_playbook: common-setup.yml
 
 
 - name: Display final credentials

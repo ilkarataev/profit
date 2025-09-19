@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { SentryModule, SentryGlobalFilter } from '@sentry/nestjs/setup'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { NegotiationsModule } from './negotiations/negotiations.module'
+import { HealthController } from './health.controller'
 import { RedisModule } from '@songkeys/nestjs-redis'
 import { APP_FILTER } from '@nestjs/core'
 
@@ -23,6 +24,7 @@ import { APP_FILTER } from '@nestjs/core'
             inject: [ConfigService],
         }),
     ],
+    controllers: [HealthController],
     providers: [
         {
             provide: APP_FILTER,
