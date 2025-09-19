@@ -48,6 +48,15 @@
     - name: Set project root directory
       set_fact:
         project_root: "{{ playbook_dir | dirname }}"
+      
+    - name: Check if we're in GitHub Actions
+      set_fact:
+        is_github_actions: "{{ ansible_env.GITHUB_ACTIONS is defined and ansible_env.GITHUB_ACTIONS == 'true' }}"
+      
+    - name: Set correct project root for GitHub Actions
+      set_fact:
+        project_root: "{{ playbook_dir }}"
+      when: is_github_actions
 
     - name: Check if source files exist
       stat:
@@ -139,8 +148,14 @@
         name: "app-network-{{ client_name }}"
         state: present
 
+    - name: Check if Traefik is already connected to client network
+      command: "docker network inspect app-network-{{ client_name }} --format '{{ '{{' }}range .Containers{{ '}}' }}{{ '{{' }}.Name{{ '}}' }}{{ '{{' }}end{{ '}}' }}'"
+      register: traefik_network_check
+      ignore_errors: yes
+
     - name: Connect Traefik to client network
       command: "docker network connect app-network-{{ client_name }} traefik"
+      when: traefik_network_check.stdout.find('traefik') == -1
       ignore_errors: yes
 
 
@@ -155,7 +170,7 @@
         state: present
         remove_orphans: yes
         recreate: always
-        build: yes
+        build: always
       become: yes
       become_user: "{{ app_user }}"
 

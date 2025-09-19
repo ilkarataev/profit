@@ -60,6 +60,17 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H ${{ inputs.domain }} >> ~/.ssh/known_hosts
 
+      - name: Prepare source files
+        run: |
+          # Создаем символические ссылки на исходные файлы в корне репозитория
+          ln -sf ../avito-main ansible/avito-main
+          ln -sf ../hh-main ansible/hh-main
+          ln -sf ../docker-compose-universal.yml ansible/docker-compose-universal.yml
+          
+          # Проверяем, что файлы существуют
+          echo "📁 Checking source files:"
+          ls -la ansible/avito-main ansible/hh-main ansible/docker-compose-universal.yml
+
       - name: Parse client configuration
         id: parse_config
         run: |
