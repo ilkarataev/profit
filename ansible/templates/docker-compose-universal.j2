@@ -1,0 +1,90 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: redis-{{ client_name }}
+    restart: unless-stopped
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data_{{ client_name }}:/data
+    networks:
+      - app-network-{{ client_name }}
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 5
+
+  avito:
+    build:
+      context: ./avito-main
+      dockerfile: Dockerfile
+    container_name: avito-{{ client_name }}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - PORT=3030
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - AVITO_API_URL=${AVITO_API_URL}
+      - BASE_URL=${BASE_URL_AVITO}
+      - WEBHOOK_URL_AVITO=${WEBHOOK_URL_AVITO}
+      - SENTRY_DSN=${SENTRY_DSN}
+    networks:
+      - app-network-{{ client_name }}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.avito-{{ client_name }}.rule=Host(`{{ site_domain }}`) && PathPrefix(`/avito`)"
+      - "traefik.http.routers.avito-{{ client_name }}.entrypoints=websecure"
+      - "traefik.http.routers.avito-{{ client_name }}.tls.certresolver=letsencrypt"
+      - "traefik.http.services.avito-{{ client_name }}.loadbalancer.server.port=3030"
+      - "traefik.http.middlewares.avito-{{ client_name }}-stripprefix.stripprefix.prefixes=/avito"
+      - "traefik.http.routers.avito-{{ client_name }}.middlewares=avito-{{ client_name }}-stripprefix"
+    volumes:
+      - avito_temp_{{ client_name }}:/usr/src/app/temp
+
+  hh:
+    build:
+      context: ./hh-main
+      dockerfile: Dockerfile
+    container_name: hh-{{ client_name }}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - PORT=3999
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - HH_CLIENT_ID=${HH_CLIENT_ID}
+      - HH_CLIENT_SECRET=${HH_CLIENT_SECRET}
+      - HH_API_URL=${HH_API_URL}
+      - BASE_URL=${BASE_URL_HH}
+      - WEBHOOK_URL_HH=${WEBHOOK_URL_HH}
+      - SENTRY_DSN=${SENTRY_DSN}
+    networks:
+      - app-network-{{ client_name }}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.hh-{{ client_name }}.rule=Host(`{{ site_domain }}`) && PathPrefix(`/hh`)"
+      - "traefik.http.routers.hh-{{ client_name }}.entrypoints=websecure"
+      - "traefik.http.routers.hh-{{ client_name }}.tls.certresolver=letsencrypt"
+      - "traefik.http.services.hh-{{ client_name }}.loadbalancer.server.port=3999"
+      - "traefik.http.middlewares.hh-{{ client_name }}-stripprefix.stripprefix.prefixes=/hh"
+      - "traefik.http.routers.hh-{{ client_name }}.middlewares=hh-{{ client_name }}-stripprefix"
+    volumes:
+      - hh_temp_{{ client_name }}:/usr/src/app/temp
+
+volumes:
+  redis_data_{{ client_name }}:
+  avito_temp_{{ client_name }}:
+  hh_temp_{{ client_name }}:
+
+networks:
+  app-network-{{ client_name }}:
+    external: true

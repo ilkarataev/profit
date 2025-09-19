@@ -4,13 +4,17 @@
   gather_facts: false
   vars:
     app_user: appuser
-    app_dir: /home/{{ app_user }}/app
+    app_dir: /home/{{ app_user }}/{{ client_name | default('main') }}
     client_name: "{{ client_name | default('main') }}"
     compose_file: docker-compose-universal.yml
     redis_user: "{{ redis_user | default('') }}"
     avito_api_url: "{{ avito_api_url | default('https://api.avito.ru') }}"
     hh_api_url: "{{ hh_api_url | default('https://api.hh.ru') }}"
     sentry_dsn: "{{ sentry_dsn | default('') }}"
+    hh_client_id: "{{ hh_client_id | default('') }}"
+    hh_client_secret: "{{ hh_client_secret | default('') }}"
+    webhook_url_avito: "{{ webhook_url_avito | default('') }}"
+    webhook_url_hh: "{{ webhook_url_hh | default('') }}"
 
   tasks:
     - name: Generate Redis password
@@ -59,16 +63,43 @@
         msg: "{{ item.item }}: {{ 'exists' if item.stat.exists else 'missing' }}"
       loop: "{{ source_files.results }}"
 
-    - name: Copy application code
+    - name: Create application archive locally
+      local_action:
+        module: archive
+        path:
+          - "{{ project_root }}/avito-main"
+          - "{{ project_root }}/hh-main"
+          - "{{ project_root }}/docker-compose-universal.yml"
+        dest: "/tmp/app-{{ client_name }}.tar.gz"
+        format: gz
+        mode: '0644'
+
+    - name: Copy application archive to server
       copy:
-        src: "{{ item }}"
+        src: "/tmp/app-{{ client_name }}.tar.gz"
+        dest: "{{ app_dir }}/app-{{ client_name }}.tar.gz"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0644'
+
+    - name: Extract application archive
+      unarchive:
+        src: "{{ app_dir }}/app-{{ client_name }}.tar.gz"
         dest: "{{ app_dir }}/"
         owner: "{{ app_user }}"
         group: "{{ app_user }}"
-      loop:
-        - "{{ project_root }}/avito-main"
-        - "{{ project_root }}/hh-main"
-        - "{{ project_root }}/docker-compose-universal.yml"
+        remote_src: yes
+
+    - name: Clean up archive file on server
+      file:
+        path: "{{ app_dir }}/app-{{ client_name }}.tar.gz"
+        state: absent
+
+    - name: Clean up local archive file
+      local_action:
+        module: file
+        path: "/tmp/app-{{ client_name }}.tar.gz"
+        state: absent
 
     - name: Create environment file
       template:
@@ -81,7 +112,6 @@
         client_name: "{{ client_name }}"
         site_domain: "{{ site_domain }}"
         redis_password: "{{ redis_password }}"
-        redis_user: "{{ redis_user | default('') }}"
         avito_api_url: "{{ avito_api_url | default('https://api.avito.ru') }}"
         hh_client_id: "{{ hh_client_id }}"
         hh_client_secret: "{{ hh_client_secret }}"
@@ -93,39 +123,28 @@
         BASE_URL_HH: "https://{{ site_domain }}/hh"
         sentry_dsn: "{{ sentry_dsn | default('') }}"
 
-    - name: Stop existing containers
-      community.docker.docker_compose_v2:
-        project_src: "{{ app_dir }}"
-        files:
-          - "{{ compose_file }}"
-        state: absent
-        remove_orphans: yes
-      become: yes
-      become_user: "{{ app_user }}"
+    - name: Create docker-compose file
+      template:
+        src: docker-compose-universal.j2
+        dest: "{{ app_dir }}/docker-compose-universal.yml"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0644'
+      vars:
+        client_name: "{{ client_name }}"
+        site_domain: "{{ site_domain }}"
+
+    - name: Create app network for client
+      community.docker.docker_network:
+        name: "app-network-{{ client_name }}"
+        state: present
+
+    - name: Connect Traefik to client network
+      command: "docker network connect app-network-{{ client_name }} traefik"
       ignore_errors: yes
 
-    - name: Remove old containers
-      community.docker.docker_container:
-        name: "{{ item }}"
-        state: absent
-        force: yes
-      become: yes
-      become_user: "{{ app_user }}"
-      ignore_errors: yes
-      loop:
-        - "avito-{{ client_name }}"
-        - "hh-{{ client_name }}"
-        - "redis-{{ client_name }}"
 
-    - name: Remove old volumes
-      community.docker.docker_volume:
-        name: "{{ item }}"
-        state: absent
-      become: yes
-      become_user: "{{ app_user }}"
-      ignore_errors: yes
-      loop:
-        - "redis_data_{{ client_name }}"
+
 
 
     - name: Deploy application
@@ -136,6 +155,7 @@
         state: present
         remove_orphans: yes
         recreate: always
+        build: yes
       become: yes
       become_user: "{{ app_user }}"
 
